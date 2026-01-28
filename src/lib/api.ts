@@ -16,12 +16,32 @@ export const api = axios.create({
 
 // Request interceptor for CSRF and security
 api.interceptors.request.use(
-  (config) => {
-    // Add CSRF token for state-changing requests
+  async (config) => {
+    // Add Bearer token if available
+    const token = AuthStorage.getToken()
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    
+    // Get CSRF token for state-changing requests
     if (['post', 'put', 'patch', 'delete'].includes(config.method?.toLowerCase() || '')) {
-      const csrfToken = AuthStorage.getCSRFToken()
-      if (csrfToken) {
-        config.headers['X-CSRF-TOKEN'] = csrfToken
+      try {
+        // Get CSRF token from Laravel Sanctum
+        const csrfResponse = await axios.get(`${API_BASE_URL.replace('/api', '')}/sanctum/csrf-cookie`, {
+          withCredentials: true
+        })
+        
+        // Extract CSRF token from cookie
+        const csrfToken = document.cookie
+          .split('; ')
+          .find(row => row.startsWith('XSRF-TOKEN='))
+          ?.split('=')[1]
+        
+        if (csrfToken) {
+          config.headers['X-XSRF-TOKEN'] = decodeURIComponent(csrfToken)
+        }
+      } catch (error) {
+        console.warn('Failed to get CSRF token:', error)
       }
     }
     return config
@@ -44,6 +64,13 @@ api.interceptors.response.use(
   (error) => {
     const { response } = error
     
+    if (response?.status === 419) {
+      // CSRF token mismatch
+      toast.error('Security token expired. Please refresh the page.')
+      window.location.reload()
+      return Promise.reject(error)
+    }
+    
     if (response?.status === 401) {
       AuthStorage.clearAuth()
       toast.error('Session expired. Please login again.')
@@ -59,7 +86,7 @@ api.interceptors.response.use(
           toast.error(error)
         })
       } else {
-        toast.error(response.data?.message || 'Validation failed')
+        toast.error(response.data?.error || response.data?.message || 'Validation failed')
       }
     } else if (response?.status === 429) {
       toast.error('Too many requests. Please try again later.')

@@ -2,29 +2,56 @@
 export class AuthStorage {
   private static readonly TOKEN_COOKIE = 'auth_token'
   private static readonly REFRESH_TOKEN_COOKIE = 'refresh_token'
+  private static readonly TOKEN_STORAGE = 'auth_token' // localStorage fallback
+
+  // Set authentication token
+  static setToken(token: string) {
+    if (typeof window === 'undefined') return
+    
+    // Store in localStorage for development
+    localStorage.setItem(this.TOKEN_STORAGE, token)
+    
+    // Also set as cookie for API calls
+    const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+    document.cookie = `${this.TOKEN_COOKIE}=${token}; expires=${expires.toUTCString()}; path=/; secure; samesite=strict`
+  }
+
+  // Get authentication token
+  static getToken(): string | null {
+    if (typeof window === 'undefined') return null
+    
+    // Try localStorage first
+    const token = localStorage.getItem(this.TOKEN_STORAGE)
+    if (token) return token
+    
+    // Fallback to cookie
+    const cookie = document.cookie
+      .split(';')
+      .find(cookie => cookie.trim().startsWith(`${this.TOKEN_COOKIE}=`))
+    
+    return cookie ? cookie.split('=')[1] : null
+  }
 
   // Set authentication tokens (server-side only)
   static setTokens(token: string, refreshToken?: string) {
-    // This will be handled by server-side API calls
-    // Client-side will use cookies automatically
-    if (typeof window !== 'undefined') {
-      // Fallback for development - remove in production
-      console.warn('Token setting should be handled server-side')
+    this.setToken(token)
+    if (refreshToken) {
+      localStorage.setItem(this.REFRESH_TOKEN_COOKIE, refreshToken)
     }
   }
 
-  // Check if user is authenticated by checking cookie existence
+  // Check if user is authenticated
   static isAuthenticated(): boolean {
-    if (typeof window === 'undefined') return false
-    
-    return document.cookie
-      .split(';')
-      .some(cookie => cookie.trim().startsWith(`${this.TOKEN_COOKIE}=`))
+    return !!this.getToken()
   }
 
   // Clear authentication (logout)
   static clearAuth() {
     if (typeof window === 'undefined') return
+    
+    // Clear localStorage
+    localStorage.removeItem(this.TOKEN_STORAGE)
+    localStorage.removeItem(this.REFRESH_TOKEN_COOKIE)
     
     // Clear cookies by setting expired date
     document.cookie = `${this.TOKEN_COOKIE}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; secure; samesite=strict`

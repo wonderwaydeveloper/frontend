@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation } from '@tanstack/react-query'
@@ -12,20 +12,92 @@ import { z } from 'zod'
 import type { LoginCredentials } from '@/types'
 
 export default function LoginPage() {
-  const [loginType, setLoginType] = useState<'email' | 'phone'>('email')
-  const [step, setStep] = useState(1) // For phone login steps
+  const [loginType, setLoginType] = useState<'email' | 'phone'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('loginType') as 'email' | 'phone') || 'email'
+    }
+    return 'email'
+  })
+  const [step, setStep] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return parseInt(localStorage.getItem('loginStep') || '1')
+    }
+    return 1
+  })
   const [credentials, setCredentials] = useState<LoginCredentials>({
     login: '',
     password: '',
   })
-  const [phone, setPhone] = useState('')
+  const [phone, setPhone] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('loginPhone') || ''
+    }
+    return ''
+  })
+  const [sessionId, setSessionId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('loginSessionId') || ''
+    }
+    return ''
+  })
   const [verificationCode, setVerificationCode] = useState('')
+  const [codeExpiresAt, setCodeExpiresAt] = useState<number | null>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('loginCodeExpiresAt')
+      return stored ? parseInt(stored) : null
+    }
+    return null
+  })
+  const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('loginResendAvailableAt')
+      return stored ? parseInt(stored) : null
+    }
+    return null
+  })
+  const [timeLeft, setTimeLeft] = useState<number>(0)
+  const [resendTimeLeft, setResendTimeLeft] = useState<number>(0)
+  const [rateLimitEndTime, setRateLimitEndTime] = useState<number | null>(null)
+  const [rateLimitTimeLeft, setRateLimitTimeLeft] = useState<number>(0)
   const [requires2FA, setRequires2FA] = useState(false)
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   
   const router = useRouter()
   const { login } = useAuth()
+
+  // Countdown timers
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Math.floor(Date.now() / 1000)
+      
+      if (codeExpiresAt) {
+        const remaining = codeExpiresAt - now
+        setTimeLeft(Math.max(0, remaining))
+      }
+      
+      if (resendAvailableAt) {
+        const remaining = resendAvailableAt - now
+        setResendTimeLeft(Math.max(0, remaining))
+      }
+      
+      if (rateLimitEndTime) {
+        const remaining = rateLimitEndTime - now
+        setRateLimitTimeLeft(Math.max(0, remaining))
+      }
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [codeExpiresAt, resendAvailableAt, rateLimitEndTime])
+
+  // Auto-submit when code is complete
+  useEffect(() => {
+    if (loginType === 'phone' && step === 2 && verificationCode.length === 6) {
+      if (validatePhoneStep2()) {
+        phoneLoginMutation.mutate({ session_id: sessionId, code: verificationCode })
+      }
+    }
+  }, [verificationCode, loginType, step, sessionId])
 
   const validateEmailLogin = () => {
     try {
@@ -88,33 +160,68 @@ export default function LoginPage() {
       if (data.requires_2fa) {
         setRequires2FA(true)
       } else {
-        await login()
+        await login(data.token)
       }
     },
   })
 
   const phoneSendCodeMutation = useMutation({
     mutationFn: async (data: { phone: string }) => {
-      console.log('Sending phone code:', data) // Debug log
-      const response = await api.post('/auth/phone/send-code', data)
+      const response = await api.post('/auth/phone/login/send-code', data)
       return response.data
     },
     onSuccess: (data) => {
-      console.log('Phone code sent successfully:', data) // Debug log
+      setSessionId(data.session_id)
+      setCodeExpiresAt(data.code_expires_at)
+      setResendAvailableAt(data.resend_available_at)
       setStep(2)
+      
+      // Save to localStorage
+      localStorage.setItem('loginSessionId', data.session_id)
+      localStorage.setItem('loginCodeExpiresAt', data.code_expires_at.toString())
+      localStorage.setItem('loginResendAvailableAt', data.resend_available_at.toString())
+      localStorage.setItem('loginStep', '2')
     },
-    onError: (error) => {
-      console.error('Phone code send error:', error) // Debug log
-    }
   })
 
   const phoneLoginMutation = useMutation({
-    mutationFn: async (data: { phone: string; verification_code: string }) => {
-      const response = await api.post('/auth/phone/login', data)
+    mutationFn: async (data: { session_id: string; code: string }) => {
+      const response = await api.post('/auth/phone/login/verify-code', data)
       return response.data
     },
     onSuccess: async (data) => {
-      await login()
+      if (data.requires_2fa) {
+        setRequires2FA(true)
+      } else {
+        // Clear login data on successful login
+        localStorage.removeItem('loginStep')
+        localStorage.removeItem('loginPhone')
+        localStorage.removeItem('loginSessionId')
+        localStorage.removeItem('loginCodeExpiresAt')
+        localStorage.removeItem('loginResendAvailableAt')
+        localStorage.removeItem('loginType')
+        await login(data.token)
+      }
+    },
+  })
+
+  const phoneResendCodeMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post('/auth/phone/login/resend-code', { session_id: sessionId })
+      return response.data
+    },
+    onSuccess: (data) => {
+      setCodeExpiresAt(data.code_expires_at)
+      setResendAvailableAt(data.resend_available_at)
+      
+      // Update localStorage
+      localStorage.setItem('loginCodeExpiresAt', data.code_expires_at.toString())
+      localStorage.setItem('loginResendAvailableAt', data.resend_available_at.toString())
+    },
+    onError: (error: any) => {
+      if (error.response?.status === 429 && error.response?.data?.retry_after) {
+        setRateLimitEndTime(error.response.data.retry_after)
+      }
     },
   })
 
@@ -127,7 +234,7 @@ export default function LoginPage() {
       return response.data
     },
     onSuccess: async (data) => {
-      await login()
+      await login(data.token)
     },
   })
 
@@ -146,7 +253,7 @@ export default function LoginPage() {
         phoneSendCodeMutation.mutate({ phone })
       } else {
         if (!validatePhoneStep2()) return
-        phoneLoginMutation.mutate({ phone, verification_code: verificationCode })
+        phoneLoginMutation.mutate({ session_id: sessionId, code: verificationCode })
       }
     }
   }
@@ -154,11 +261,25 @@ export default function LoginPage() {
   const resetForm = () => {
     setStep(1)
     setPhone('')
+    setSessionId('')
     setVerificationCode('')
+    setCodeExpiresAt(null)
+    setResendAvailableAt(null)
+    setTimeLeft(0)
+    setResendTimeLeft(0)
+    setRateLimitEndTime(null)
+    setRateLimitTimeLeft(0)
     setCredentials({ login: '', password: '' })
     setRequires2FA(false)
     setTwoFactorCode('')
     setErrors({})
+    
+    // Clear localStorage
+    localStorage.removeItem('loginStep')
+    localStorage.removeItem('loginPhone')
+    localStorage.removeItem('loginSessionId')
+    localStorage.removeItem('loginCodeExpiresAt')
+    localStorage.removeItem('loginResendAvailableAt')
   }
 
   if (requires2FA) {
@@ -208,6 +329,7 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => {
                   setLoginType('email')
+                  localStorage.setItem('loginType', 'email')
                   resetForm()
                 }}
                 className={`flex items-center px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
@@ -225,6 +347,7 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => {
                   setLoginType('phone')
+                  localStorage.setItem('loginType', 'phone')
                   resetForm()
                 }}
                 className={`flex items-center px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
@@ -256,7 +379,6 @@ export default function LoginPage() {
             
             <AuthInput
               label="Password"
-              type="password"
               placeholder="Enter your password"
               fieldType="password"
               value={credentials.password}
@@ -273,13 +395,21 @@ export default function LoginPage() {
                 placeholder="Enter your phone number"
                 fieldType="phone"
                 value={phone}
-                onChange={(value) => setPhone(value)}
+                onChange={(value) => {
+                  setPhone(value)
+                  localStorage.setItem('loginPhone', value)
+                }}
                 error={errors.phone}
               />
             ) : (
               <>
                 <div className="text-sm text-gray-600 text-center mb-4">
                   Code sent to {phone}
+                  {timeLeft > 0 && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      Code expires in {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+                    </div>
+                  )}
                 </div>
                 <AuthInput
                   label="Verification Code"
@@ -289,7 +419,7 @@ export default function LoginPage() {
                   className="text-center text-2xl tracking-widest"
                   fieldType="code"
                   value={verificationCode}
-                  onChange={(value) => setVerificationCode(value)}
+                  onChange={(value) => setVerificationCode(value.replace(/\D/g, ''))}
                   error={errors.verification_code}
                 />
               </>
@@ -308,14 +438,25 @@ export default function LoginPage() {
         
         {loginType === 'phone' && step === 2 && (
           <div className="text-center">
-            <button
-              type="button"
-              onClick={() => phoneSendCodeMutation.mutate({ phone })}
-              disabled={phoneSendCodeMutation.isPending}
-              className="text-sm text-green-600 hover:text-green-500 disabled:opacity-50"
-            >
-              {phoneSendCodeMutation.isPending ? 'Sending...' : 'Resend code'}
-            </button>
+            {rateLimitTimeLeft > 0 ? (
+              <div className="text-sm text-red-500">
+                Rate limited. Try again in {Math.floor(rateLimitTimeLeft / 60)}:{(rateLimitTimeLeft % 60).toString().padStart(2, '0')}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => phoneResendCodeMutation.mutate()}
+                disabled={phoneResendCodeMutation.isPending || resendTimeLeft > 0}
+                className="text-sm text-green-600 hover:text-green-500 disabled:opacity-50"
+              >
+                {phoneResendCodeMutation.isPending 
+                  ? 'Sending...' 
+                  : resendTimeLeft > 0 
+                    ? `Resend in ${resendTimeLeft}s`
+                    : 'Resend code'
+                }
+              </button>
+            )}
           </div>
         )}
       </form>

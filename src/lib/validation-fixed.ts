@@ -38,8 +38,8 @@ export const passwordSchema = z.string()
 
 // Username matching backend regex
 export const usernameSchema = z.string()
-  .min(4, 'Username must be at least 4 characters')
-  .max(15, 'Username must not exceed 15 characters')
+  .min(1, ERROR_MESSAGES.USERNAME_REQUIRED)
+  .max(255, ERROR_MESSAGES.USERNAME_MAX_LENGTH)
   .regex(VALIDATION_PATTERNS.USERNAME, ERROR_MESSAGES.USERNAME_FORMAT)
 
 // 2FA code matching backend validation
@@ -79,8 +79,10 @@ export const loginSchema = z.object({
   two_factor_code: codeSchema.optional()
 })
 
-// Multi-step registration schemas
+// Multi-step registration schemas (FIXED to match backend exactly)
 export const registerStep1Schema = z.object({
+  name: nameSchema,
+  date_of_birth: dateOfBirthSchema,
   contact: z.string().min(1, 'Contact is required'),
   contact_type: z.enum(['email', 'phone'])
 }).refine((data) => {
@@ -99,13 +101,26 @@ export const registerStep2Schema = z.object({
   code: codeSchema
 })
 
-// Step 3 matching backend PhoneRegisterRequest
+// Step 3 matching backend (only username and password)
 export const registerStep3Schema = z.object({
-  name: nameSchema,
   username: usernameSchema,
   password: passwordSchema,
+  password_confirmation: z.string()
+}).refine((data) => data.password === data.password_confirmation, {
+  message: ERROR_MESSAGES.PASSWORD_MISMATCH,
+  path: ['password_confirmation']
+})
+
+// Phone registration schemas matching backend PhoneRegisterRequest
+export const phoneRegisterSchema = z.object({
+  phone: phoneSchema,
+  name: nameSchema,
+  username: usernameSchema,
+  email: emailSchema.optional(),
+  password: passwordSchema,
   password_confirmation: z.string(),
-  date_of_birth: dateOfBirthSchema
+  date_of_birth: dateOfBirthSchema,
+  verification_code: codeSchema
 }).refine((data) => data.password === data.password_confirmation, {
   message: ERROR_MESSAGES.PASSWORD_MISMATCH,
   path: ['password_confirmation']
@@ -146,7 +161,7 @@ export const forgotPasswordStep3Schema = z.object({
   path: ['password_confirmation']
 })
 
-// Email verification schema
+// Email verification schema (FIXED to match backend)
 export const emailVerifySchema = z.object({
   email: emailSchema,
   code: codeSchema
@@ -173,6 +188,11 @@ export const verify2FASchema = z.object({
 
 export const disable2FASchema = z.object({
   password: z.string().min(1, 'Password is required')
+})
+
+// Age verification schema for social auth
+export const ageVerificationSchema = z.object({
+  date_of_birth: dateOfBirthSchema
 })
 
 // Utility function to handle Zod errors

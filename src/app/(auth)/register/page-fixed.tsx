@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation } from '@tanstack/react-query'
@@ -13,15 +13,15 @@ import { z } from 'zod'
 export default function RegisterPage() {
   const [step, setStep] = useState(1)
   const [sessionId, setSessionId] = useState('')
-  const [contact, setContact] = useState('')
-  const [contactType, setContactType] = useState<'email' | 'phone'>('email')
-  const [code, setCode] = useState('')
-  const [resendTimer, setResendTimer] = useState(0)
   const [formData, setFormData] = useState({
-    // Step 1 fields (matching backend)
+    // Step 1 data (matching backend)
     name: '',
     date_of_birth: '',
-    // Step 3 fields
+    contact: '',
+    contact_type: 'email' as 'email' | 'phone',
+    // Step 2 data
+    code: '',
+    // Step 3 data
     username: '',
     password: '',
     password_confirmation: '',
@@ -30,58 +30,9 @@ export default function RegisterPage() {
   const router = useRouter()
   const { login } = useAuth()
 
-  // Timer countdown effect
-  useEffect(() => {
-    if (resendTimer > 0) {
-      const timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000)
-      return () => clearTimeout(timer)
-    }
-  }, [resendTimer])
-
-  // Persist session data in localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedData = localStorage.getItem('registration_data')
-      if (savedData) {
-        try {
-          const parsed = JSON.parse(savedData)
-          if (parsed.step && parsed.step > 1) {
-            setStep(parsed.step)
-            setSessionId(parsed.sessionId || '')
-            setContact(parsed.contact || '')
-            setContactType(parsed.contactType || 'email')
-            setFormData(parsed.formData || formData)
-            
-            // If we're on step 2, start a shorter timer
-            if (parsed.step === 2) {
-              setResendTimer(30)
-            }
-          }
-        } catch (error) {
-          console.error('Error parsing saved registration data:', error)
-          localStorage.removeItem('registration_data')
-        }
-      }
-    }
-  }, [])
-
-  // Save session data to localStorage
-  const saveSessionData = (data: any) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('registration_data', JSON.stringify(data))
-    }
-  }
-
-  // Clear session data
-  const clearSessionData = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('registration_data')
-    }
-  }
-
   // Auto-submit when code is complete
   const handleCodeChange = (value: string) => {
-    setCode(value)
+    setFormData({ ...formData, code: value })
     if (value.length === 6) {
       setTimeout(() => {
         step2Mutation.mutate({ session_id: sessionId, code: value })
@@ -91,12 +42,14 @@ export default function RegisterPage() {
 
   const validateStep1 = () => {
     try {
-      registerStep1Schema.parse({ 
+      // Validate all step 1 fields as per backend
+      const step1Data = {
         name: formData.name,
         date_of_birth: formData.date_of_birth,
-        contact, 
-        contact_type: contactType 
-      })
+        contact: formData.contact,
+        contact_type: formData.contact_type
+      }
+      registerStep1Schema.parse(step1Data)
       setErrors({})
       return true
     } catch (error) {
@@ -109,7 +62,12 @@ export default function RegisterPage() {
 
   const validateStep3 = () => {
     try {
-      registerStep3Schema.parse(formData)
+      const step3Data = {
+        username: formData.username,
+        password: formData.password,
+        password_confirmation: formData.password_confirmation
+      }
+      registerStep3Schema.parse(step3Data)
       setErrors({})
       return true
     } catch (error) {
@@ -121,11 +79,11 @@ export default function RegisterPage() {
   }
 
   const step1Mutation = useMutation({
-    mutationFn: async (data: { 
-      name: string;
-      date_of_birth: string;
-      contact: string; 
-      contact_type: string 
+    mutationFn: async (data: {
+      name: string
+      date_of_birth: string
+      contact: string
+      contact_type: string
     }) => {
       const response = await api.post('/auth/register/step1', data)
       return response.data
@@ -133,18 +91,6 @@ export default function RegisterPage() {
     onSuccess: (data) => {
       setSessionId(data.session_id)
       setStep(2)
-      
-      // Calculate remaining time from backend
-      const remainingTime = data.resend_available_at - Math.floor(Date.now() / 1000)
-      setResendTimer(Math.max(0, remainingTime))
-      
-      saveSessionData({
-        step: 2,
-        sessionId: data.session_id,
-        contact,
-        contactType,
-        formData
-      })
     },
   })
 
@@ -153,87 +99,49 @@ export default function RegisterPage() {
       const response = await api.post('/auth/register/step2', data)
       return response.data
     },
-    onSuccess: () => {
-      setStep(3)
-      saveSessionData({
-        step: 3,
-        sessionId,
-        contact,
-        contactType,
-        formData
-      })
-    },
+    onSuccess: () => setStep(3),
   })
 
   const step3Mutation = useMutation({
-    mutationFn: async (data: any) => {
-      const response = await api.post('/auth/register/step3', {
-        session_id: sessionId,
-        ...data,
-      })
+    mutationFn: async (data: {
+      session_id: string
+      username: string
+      password: string
+      password_confirmation: string
+    }) => {
+      const response = await api.post('/auth/register/step3', data)
       return response.data
     },
     onSuccess: async (data) => {
-      clearSessionData()
       await login(data.token)
-    },
-  })
-
-  const resendCodeMutation = useMutation({
-    mutationFn: async () => {
-      const response = await api.post('/auth/register/resend-code', {
-        session_id: sessionId
-      })
-      return response.data
-    },
-    onSuccess: (data) => {
-      setSessionId(data.session_id)
-      const remainingTime = data.resend_available_at - Math.floor(Date.now() / 1000)
-      setResendTimer(Math.max(0, remainingTime))
-      setCode('')
-    },
-    onError: (error: any) => {
-      if (error.response?.status === 429) {
-        const errorData = error.response.data
-        if (errorData.retry_after) {
-          const remainingTime = errorData.retry_after - Math.floor(Date.now() / 1000)
-          setResendTimer(Math.max(0, remainingTime))
-        } else if (errorData.resend_available_at) {
-          const remainingTime = errorData.resend_available_at - Math.floor(Date.now() / 1000)
-          setResendTimer(Math.max(0, remainingTime))
-        } else if (errorData.remaining_seconds) {
-          setResendTimer(errorData.remaining_seconds)
-        }
-      }
     },
   })
 
   const handleStep1 = (e: React.FormEvent) => {
     e.preventDefault()
     if (!validateStep1()) return
-    step1Mutation.mutate({ 
+    step1Mutation.mutate({
       name: formData.name,
       date_of_birth: formData.date_of_birth,
-      contact, 
-      contact_type: contactType 
+      contact: formData.contact,
+      contact_type: formData.contact_type
     })
   }
 
   const handleStep2 = (e: React.FormEvent) => {
     e.preventDefault()
-    step2Mutation.mutate({ session_id: sessionId, code })
+    step2Mutation.mutate({ session_id: sessionId, code: formData.code })
   }
 
   const handleStep3 = (e: React.FormEvent) => {
     e.preventDefault()
     if (!validateStep3()) return
-    step3Mutation.mutate(formData)
-  }
-
-  const handleResendCode = () => {
-    if (resendTimer === 0) {
-      resendCodeMutation.mutate()
-    }
+    step3Mutation.mutate({
+      session_id: sessionId,
+      username: formData.username,
+      password: formData.password,
+      password_confirmation: formData.password_confirmation
+    })
   }
 
   if (step === 1) {
@@ -264,9 +172,9 @@ export default function RegisterPage() {
               <div className="relative inline-flex bg-gray-200 rounded-full p-1">
                 <button
                   type="button"
-                  onClick={() => setContactType('email')}
+                  onClick={() => setFormData({ ...formData, contact_type: 'email' })}
                   className={`flex items-center px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                    contactType === 'email'
+                    formData.contact_type === 'email'
                       ? 'bg-green-600 text-white shadow-sm'
                       : 'text-gray-600 hover:text-gray-800'
                   }`}
@@ -278,9 +186,9 @@ export default function RegisterPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setContactType('phone')}
+                  onClick={() => setFormData({ ...formData, contact_type: 'phone' })}
                   className={`flex items-center px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                    contactType === 'phone'
+                    formData.contact_type === 'phone'
                       ? 'bg-green-600 text-white shadow-sm'
                       : 'text-gray-600 hover:text-gray-800'
                   }`}
@@ -295,12 +203,12 @@ export default function RegisterPage() {
           </div>
           
           <AuthInput
-            label={contactType === 'email' ? 'Email Address' : 'Phone Number'}
-            type={contactType === 'email' ? 'email' : 'tel'}
-            placeholder={contactType === 'email' ? 'Enter your email' : 'Enter your phone number'}
-            fieldType={contactType === 'email' ? 'email' : 'phone'}
-            value={contact}
-            onChange={(value) => setContact(value)}
+            label={formData.contact_type === 'email' ? 'Email Address' : 'Phone Number'}
+            type={formData.contact_type === 'email' ? 'email' : 'tel'}
+            placeholder={formData.contact_type === 'email' ? 'Enter your email' : 'Enter your phone number'}
+            fieldType={formData.contact_type === 'email' ? 'email' : 'phone'}
+            value={formData.contact}
+            onChange={(value) => setFormData({ ...formData, contact: value })}
             error={errors.contact}
           />
           
@@ -327,7 +235,7 @@ export default function RegisterPage() {
 
   if (step === 2) {
     return (
-      <AuthCard title={`Verify your ${contactType}`} subtitle={`Step 2 of 3: Enter the 6-digit code sent to ${contact}`}>
+      <AuthCard title={`Verify your ${formData.contact_type}`} subtitle={`Step 2 of 3: Enter the 6-digit code sent to ${formData.contact}`}>
         <form onSubmit={handleStep2} className="space-y-6">
           <AuthInput
             label="Verification Code"
@@ -336,7 +244,7 @@ export default function RegisterPage() {
             placeholder="000000"
             className="text-center text-2xl tracking-widest"
             fieldType="code"
-            value={code}
+            value={formData.code}
             onChange={handleCodeChange}
           />
           
@@ -344,41 +252,20 @@ export default function RegisterPage() {
             Verify Code
           </AuthButton>
           
-          <div className="text-center space-y-2">
-            {resendTimer > 0 ? (
-              <p className="text-sm text-gray-500">
-                Resend code in {Math.floor(resendTimer / 60)}:{(resendTimer % 60).toString().padStart(2, '0')}
-              </p>
-            ) : (
-              <button
-                type="button"
-                onClick={handleResendCode}
-                disabled={resendCodeMutation.isPending}
-                className="text-sm text-green-600 hover:text-green-500 disabled:opacity-50 hover:underline"
-              >
-                {resendCodeMutation.isPending ? 'Sending...' : 'Resend code'}
-              </button>
-            )}
-            
-            <div>
-              <button
-                type="button"
-                onClick={() => {
-                  setStep(1)
-                  setCode('')
-                  saveSessionData({
-                    step: 1,
-                    sessionId: '',
-                    contact,
-                    contactType,
-                    formData
-                  })
-                }}
-                className="text-sm text-gray-500 hover:text-gray-700 hover:underline"
-              >
-                Change {contactType}
-              </button>
-            </div>
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => step1Mutation.mutate({
+                name: formData.name,
+                date_of_birth: formData.date_of_birth,
+                contact: formData.contact,
+                contact_type: formData.contact_type
+              })}
+              disabled={step1Mutation.isPending}
+              className="text-sm text-green-600 hover:text-green-500 disabled:opacity-50"
+            >
+              {step1Mutation.isPending ? 'Sending...' : 'Resend code'}
+            </button>
           </div>
         </form>
       </AuthCard>

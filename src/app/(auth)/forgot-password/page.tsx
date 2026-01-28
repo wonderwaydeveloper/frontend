@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation } from '@tanstack/react-query'
@@ -10,13 +10,55 @@ import { z } from 'zod'
 import api from '@/lib/api'
 
 export default function ForgotPasswordPage() {
-  const [step, setStep] = useState(1)
-  const [email, setEmail] = useState('')
+  const [step, setStep] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return parseInt(localStorage.getItem('forgot-password-step') || '1')
+    }
+    return 1
+  })
+  const [email, setEmail] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('forgot-password-email') || ''
+    }
+    return ''
+  })
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const [resendTimer, setResendTimer] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const savedTimer = localStorage.getItem('forgot-password-timer')
+      if (savedTimer) {
+        const remainingTime = parseInt(savedTimer) - Math.floor(Date.now() / 1000)
+        if (remainingTime > 0) {
+          return remainingTime
+        } else {
+          localStorage.removeItem('forgot-password-timer')
+        }
+      }
+    }
+    return 0
+  })
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const router = useRouter()
+
+  // Timer countdown effect
+  useEffect(() => {
+    if (resendTimer > 0) {
+      const timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [resendTimer])
+
+  // Auto-submit when code is complete
+  const handleCodeChange = (value: string) => {
+    setCode(value)
+    if (value.length === 6) {
+      setTimeout(() => {
+        verifyCodeMutation.mutate({ email, code: value })
+      }, 100)
+    }
+  }
 
   const validateStep1 = () => {
     try {
@@ -70,7 +112,59 @@ export default function ForgotPasswordPage() {
       const response = await api.post('/auth/password/forgot', { email })
       return response.data
     },
-    onSuccess: () => setStep(2),
+    onSuccess: (data) => {
+      setStep(2)
+      localStorage.setItem('forgot-password-step', '2')
+      localStorage.setItem('forgot-password-email', email)
+      const remainingTime = data.resend_available_at - Math.floor(Date.now() / 1000)
+      const timerValue = Math.max(0, remainingTime)
+      setResendTimer(timerValue)
+      if (timerValue > 0) {
+        localStorage.setItem('forgot-password-timer', data.resend_available_at.toString())
+      }
+    },
+  })
+
+  const resendCodeMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post('/auth/password/resend', { email })
+      return response.data
+    },
+    onSuccess: (data) => {
+      const remainingTime = data.resend_available_at - Math.floor(Date.now() / 1000)
+      const timerValue = Math.max(0, remainingTime)
+      setResendTimer(timerValue)
+      if (timerValue > 0) {
+        localStorage.setItem('forgot-password-timer', data.resend_available_at.toString())
+      } else {
+        localStorage.removeItem('forgot-password-timer')
+      }
+      setCode('')
+    },
+    onError: (error: any) => {
+      if (error.response?.status === 429) {
+        const errorData = error.response.data
+        if (errorData.retry_after) {
+          const remainingTime = errorData.retry_after - Math.floor(Date.now() / 1000)
+          setResendTimer(Math.max(0, remainingTime))
+          if (remainingTime > 0) {
+            localStorage.setItem('forgot-password-timer', errorData.retry_after.toString())
+          }
+        } else if (errorData.resend_available_at) {
+          const remainingTime = errorData.resend_available_at - Math.floor(Date.now() / 1000)
+          const timerValue = Math.max(0, remainingTime)
+          setResendTimer(timerValue)
+          if (timerValue > 0) {
+            localStorage.setItem('forgot-password-timer', errorData.resend_available_at.toString())
+          }
+        } else if (errorData.remaining_seconds) {
+          const timerValue = errorData.remaining_seconds
+          setResendTimer(timerValue)
+          const futureTimestamp = Math.floor(Date.now() / 1000) + timerValue
+          localStorage.setItem('forgot-password-timer', futureTimestamp.toString())
+        }
+      }
+    },
   })
 
   const verifyCodeMutation = useMutation({
@@ -78,7 +172,10 @@ export default function ForgotPasswordPage() {
       const response = await api.post('/auth/password/verify-code', data)
       return response.data
     },
-    onSuccess: () => setStep(3),
+    onSuccess: () => {
+      setStep(3)
+      localStorage.setItem('forgot-password-step', '3')
+    },
   })
 
   const resetMutation = useMutation({
@@ -86,7 +183,12 @@ export default function ForgotPasswordPage() {
       const response = await api.post('/auth/password/reset', data)
       return response.data
     },
-    onSuccess: () => router.push('/login'),
+    onSuccess: () => {
+      localStorage.removeItem('forgot-password-step')
+      localStorage.removeItem('forgot-password-email')
+      localStorage.removeItem('forgot-password-timer')
+      router.push('/login')
+    },
   })
 
   if (step === 1) {
@@ -97,8 +199,9 @@ export default function ForgotPasswordPage() {
             label="Email Address"
             type="email"
             placeholder="Enter your email address"
+            fieldType="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(value) => setEmail(value)}
             error={errors.email}
           />
           
@@ -118,7 +221,7 @@ export default function ForgotPasswordPage() {
 
   if (step === 2) {
     return (
-      <AuthCard title="Enter reset code" subtitle={`Enter the 6-digit code sent to ${email}`}>
+      <AuthCard title="Enter reset code" subtitle={`Step 2 of 3: Enter the 6-digit code sent to ${email}`}>
         <form onSubmit={(e) => { e.preventDefault(); if (!validateStep2()) return; verifyCodeMutation.mutate({ email, code }) }} className="space-y-6">
           <AuthInput
             label="Reset Code"
@@ -126,39 +229,73 @@ export default function ForgotPasswordPage() {
             maxLength={6}
             placeholder="000000"
             className="text-center text-2xl tracking-widest"
+            fieldType="code"
             value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+            onChange={handleCodeChange}
             error={errors.code}
           />
           
           <AuthButton type="submit" loading={verifyCodeMutation.isPending}>
             Verify Code
           </AuthButton>
+          
+          <div className="text-center space-y-2">
+            {resendTimer > 0 ? (
+              <p className="text-sm text-gray-500">
+                Resend code in {Math.floor(resendTimer / 60)}:{(resendTimer % 60).toString().padStart(2, '0')}
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => resendCodeMutation.mutate()}
+                disabled={resendCodeMutation.isPending}
+                className="text-sm text-green-600 hover:text-green-500 disabled:opacity-50 hover:underline"
+              >
+                {resendCodeMutation.isPending ? 'Sending...' : 'Resend code'}
+              </button>
+            )}
+            
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep(1)
+                  setCode('')
+                  setResendTimer(0)
+                  localStorage.removeItem('forgot-password-step')
+                  localStorage.removeItem('forgot-password-email')
+                  localStorage.removeItem('forgot-password-timer')
+                }}
+                className="text-sm text-gray-500 hover:text-gray-700 hover:underline"
+              >
+                Change email
+              </button>
+            </div>
+          </div>
         </form>
       </AuthCard>
     )
   }
 
   return (
-    <AuthCard title="Set new password" subtitle="Enter your new password">
+    <AuthCard title="Set new password" subtitle="Step 3 of 3: Enter your new password">
       <form onSubmit={(e) => { e.preventDefault(); if (!validateStep3()) return; resetMutation.mutate({ email, code, password, password_confirmation: passwordConfirmation }) }} className="space-y-6">
         <AuthInput
           label="New Password"
-          type="password"
           placeholder="Enter new password"
           fieldType="password"
+          showStrength={true}
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(value) => setPassword(value)}
           error={errors.password}
         />
         
         <AuthInput
           label="Confirm Password"
-          type="password"
           placeholder="Confirm new password"
           fieldType="password"
           value={passwordConfirmation}
-          onChange={(e) => setPasswordConfirmation(e.target.value)}
+          onChange={(value) => setPasswordConfirmation(value)}
           error={errors.passwordConfirmation}
         />
         

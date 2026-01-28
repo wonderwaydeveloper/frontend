@@ -38,9 +38,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const userData = await AuthAPI.getCurrentUser()
       setUser(userData)
       
-      // Check if age verification is needed
+      // Check if age verification is needed (for social auth users)
       if (!userData.date_of_birth && (userData.google_id || userData.apple_id)) {
         setRequiresAgeVerification(true)
+        router.push('/age-verification')
+        return userData
       }
       
       return userData
@@ -51,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       throw error
     }
-  }, [])
+  }, [router])
 
   const refreshUser = useCallback(async () => {
     if (!AuthStorage.isAuthenticated()) return
@@ -89,23 +91,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (token?: string) => {
     try {
       setIsLoading(true)
-      
-      // If token is provided, store it first
-      if (token) {
-        AuthStorage.setToken(token)
-      }
-      
       const userData = await fetchUser()
       
       // Check for 2FA requirement
       if (userData.two_factor_enabled && !token) {
         setRequires2FA(true)
+        // Stay on current page for 2FA input
         return
       }
       
       // Check for age verification requirement
       if (!userData.date_of_birth && (userData.google_id || userData.apple_id)) {
         setRequiresAgeVerification(true)
+        router.push('/age-verification')
         return
       }
       
@@ -121,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       
       router.push('/timeline')
-      toast.success('Welcome!')
+      toast.success('Welcome back!')
     } catch (error: any) {
       AuthStorage.clearAuth()
       setUser(null)
@@ -132,17 +130,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const logout = async () => {
-    if (!confirm('Are you sure you want to logout?')) {
-      return
-    }
-    
     try {
       await AuthAPI.logout()
     } catch (error) {
       console.error('Logout API call failed:', error)
     }
     
-    AuthStorage.clearAuth()
     setUser(null)
     setRequires2FA(false)
     setRequiresAgeVerification(false)
@@ -151,23 +144,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const logoutAll = async () => {
-    if (!confirm('Are you sure you want to logout from all devices?')) {
-      return
-    }
-    
     try {
       await AuthAPI.logoutAll()
+      setUser(null)
+      setRequires2FA(false)
+      setRequiresAgeVerification(false)
+      router.push('/login')
+      toast.success('Logged out from all devices')
     } catch (error) {
       console.error('Logout all failed:', error)
       toast.error('Failed to logout from all devices')
     }
-    
-    AuthStorage.clearAuth()
-    setUser(null)
-    setRequires2FA(false)
-    setRequiresAgeVerification(false)
-    router.push('/login')
-    toast.success('Logged out from all devices')
   }
 
   const updateUser = (updatedUser: AuthUser) => {
