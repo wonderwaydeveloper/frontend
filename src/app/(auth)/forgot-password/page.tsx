@@ -193,7 +193,7 @@ export default function ForgotPasswordPage() {
 
   if (step === 1) {
     return (
-      <AuthCard title="Reset your password" subtitle="Enter your email address and we'll send you a reset code">
+      <AuthCard title="Reset your password" subtitle="Enter your email address. If registered, you'll receive a reset code.">
         <form onSubmit={(e) => { e.preventDefault(); if (!validateStep1()) return; forgotMutation.mutate(email) }} className="space-y-6">
           <AuthInput
             label="Email Address"
@@ -221,7 +221,7 @@ export default function ForgotPasswordPage() {
 
   if (step === 2) {
     return (
-      <AuthCard title="Enter reset code" subtitle={`Step 2 of 3: Enter the 6-digit code sent to ${email}`}>
+      <AuthCard title="Enter reset code" subtitle={`Step 2 of 3: Check your email for the reset code`}>
         <form onSubmit={(e) => { e.preventDefault(); if (!validateStep2()) return; verifyCodeMutation.mutate({ email, code }) }} className="space-y-6">
           <AuthInput
             label="Reset Code"

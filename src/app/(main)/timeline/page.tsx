@@ -12,7 +12,8 @@ export default function TimelinePage() {
     queryKey: ['timeline'],
     queryFn: async () => {
       const response = await api.get('/timeline')
-      return response.data.data as Post[]
+      const data = response.data
+      return Array.isArray(data) ? data : (data?.data || data?.posts || [])
     },
   })
 
@@ -31,7 +32,7 @@ export default function TimelinePage() {
     <div className="max-w-2xl mx-auto">
       {/* Header */}
       <div className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-gray-200 p-4">
-        <h1 className="text-xl font-bold">Home</h1>
+        <h1 className="text-xl font-bold text-gray-900">Home</h1>
       </div>
 
       {/* Create Post */}
@@ -41,14 +42,14 @@ export default function TimelinePage() {
       <div className="divide-y divide-gray-200">
         {isLoading ? (
           <LoadingCard count={5} />
-        ) : posts?.length === 0 ? (
+        ) : Array.isArray(posts) && posts.length === 0 ? (
           <div className="p-8 text-center text-gray-500">
             <p>No posts yet. Start following people to see their posts!</p>
           </div>
         ) : (
-          posts?.map((post) => (
+          Array.isArray(posts) ? posts.map((post) => (
             <PostCard key={post.id} post={post} />
-          ))
+          )) : null
         )}
       </div>
     </div>

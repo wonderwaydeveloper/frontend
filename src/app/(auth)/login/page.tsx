@@ -60,6 +60,9 @@ export default function LoginPage() {
   const [rateLimitEndTime, setRateLimitEndTime] = useState<number | null>(null)
   const [rateLimitTimeLeft, setRateLimitTimeLeft] = useState<number>(0)
   const [requires2FA, setRequires2FA] = useState(false)
+  const [requiresDeviceVerification, setRequiresDeviceVerification] = useState(false)
+  const [deviceFingerprint, setDeviceFingerprint] = useState('')
+  const [deviceVerificationCode, setDeviceVerificationCode] = useState('')
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   
@@ -151,6 +154,19 @@ export default function LoginPage() {
     }
   }
 
+  const validateDeviceVerification = () => {
+    try {
+      codeSchema.parse(deviceVerificationCode)
+      setErrors({})
+      return true
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        setErrors({ deviceVerificationCode: error.errors.map(e => e.message) })
+      }
+      return false
+    }
+  }
+
   const emailLoginMutation = useMutation({
     mutationFn: async (data: LoginCredentials) => {
       const response = await api.post('/auth/login', data)
@@ -159,6 +175,9 @@ export default function LoginPage() {
     onSuccess: async (data) => {
       if (data.requires_2fa) {
         setRequires2FA(true)
+      } else if (data.requires_device_verification) {
+        setRequiresDeviceVerification(true)
+        setDeviceFingerprint(data.fingerprint)
       } else {
         await login(data.token)
       }
@@ -192,6 +211,9 @@ export default function LoginPage() {
     onSuccess: async (data) => {
       if (data.requires_2fa) {
         setRequires2FA(true)
+      } else if (data.requires_device_verification) {
+        setRequiresDeviceVerification(true)
+        setDeviceFingerprint(data.fingerprint)
       } else {
         // Clear login data on successful login
         localStorage.removeItem('loginStep')
@@ -234,6 +256,25 @@ export default function LoginPage() {
       return response.data
     },
     onSuccess: async (data) => {
+      if (data.requires_device_verification) {
+        setRequires2FA(false)
+        setRequiresDeviceVerification(true)
+        setDeviceFingerprint(data.fingerprint)
+      } else {
+        await login(data.token)
+      }
+    },
+  })
+
+  const verifyDeviceMutation = useMutation({
+    mutationFn: async (code: string) => {
+      const response = await api.post('/auth/verify-device', {
+        code,
+        fingerprint: deviceFingerprint
+      })
+      return response.data
+    },
+    onSuccess: async (data) => {
       await login(data.token)
     },
   })
@@ -241,7 +282,10 @@ export default function LoginPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (requires2FA) {
+    if (requiresDeviceVerification) {
+      if (!validateDeviceVerification()) return
+      verifyDeviceMutation.mutate(deviceVerificationCode)
+    } else if (requires2FA) {
       if (!validate2FA()) return
       verify2FAMutation.mutate(twoFactorCode)
     } else if (loginType === 'email') {
@@ -271,6 +315,9 @@ export default function LoginPage() {
     setRateLimitTimeLeft(0)
     setCredentials({ login: '', password: '' })
     setRequires2FA(false)
+    setRequiresDeviceVerification(false)
+    setDeviceFingerprint('')
+    setDeviceVerificationCode('')
     setTwoFactorCode('')
     setErrors({})
     
@@ -280,6 +327,42 @@ export default function LoginPage() {
     localStorage.removeItem('loginSessionId')
     localStorage.removeItem('loginCodeExpiresAt')
     localStorage.removeItem('loginResendAvailableAt')
+  }
+
+  if (requiresDeviceVerification) {
+    return (
+      <AuthCard 
+        title="Device Verification" 
+        subtitle="We've sent a verification code to your email for this new device"
+      >
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <AuthInput
+            label="Verification Code"
+            type="text"
+            maxLength={6}
+            placeholder="000000"
+            className="text-center text-2xl tracking-widest"
+            value={deviceVerificationCode}
+            onChange={(e) => setDeviceVerificationCode(e.target.value.replace(/\D/g, ''))}
+            error={errors.deviceVerificationCode}
+          />
+          
+          <AuthButton type="submit" loading={verifyDeviceMutation.isPending}>
+            Verify Device
+          </AuthButton>
+          
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={resetForm}
+              className="text-green-600 hover:text-green-500 text-sm"
+            >
+              Back to login
+            </button>
+          </div>
+        </form>
+      </AuthCard>
+    )
   }
 
   if (requires2FA) {

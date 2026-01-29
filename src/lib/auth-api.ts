@@ -67,12 +67,20 @@ export class AuthAPI {
   }
 
   static async phoneLogin(data: PhoneLoginData) {
-    const response = await api.post('/auth/phone/login', data)
+    const response = await api.post('/auth/phone/login/verify-code', {
+      session_id: data.phone, // This should be session_id from send-code response
+      code: data.verification_code
+    })
     return response.data
   }
 
   static async phoneSendCode(phone: string) {
-    const response = await api.post('/auth/phone/send-code', { phone })
+    const response = await api.post('/auth/phone/login/send-code', { phone })
+    return response.data
+  }
+
+  static async phoneResendCode(sessionId: string) {
+    const response = await api.post('/auth/phone/login/resend-code', { session_id: sessionId })
     return response.data
   }
 

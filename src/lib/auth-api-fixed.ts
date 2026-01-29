@@ -10,11 +10,9 @@ export interface MultiStepRegistrationData {
 
 export interface CompleteRegistrationData {
   session_id: string
-  name: string
   username: string
   password: string
   password_confirmation: string
-  date_of_birth: string
 }
 
 export interface LoginData {
@@ -24,18 +22,8 @@ export interface LoginData {
 }
 
 export interface PhoneLoginData {
-  phone: string
-  verification_code: string
-}
-
-export interface PhoneRegisterData {
-  phone: string
-  name: string
-  username: string
-  password: string
-  password_confirmation: string
-  date_of_birth: string
-  verification_code: string
+  session_id: string
+  code: string
 }
 
 export interface DeviceInfo {
@@ -72,9 +60,8 @@ export class AuthAPI {
     return response.data
   }
 
-  // Phone registration (NEW)
-  static async phoneRegister(data: PhoneRegisterData) {
-    const response = await api.post('/auth/phone/register', data)
+  static async registerResendCode(sessionId: string) {
+    const response = await api.post('/auth/register/resend-code', { session_id: sessionId })
     return response.data
   }
 
@@ -84,19 +71,22 @@ export class AuthAPI {
     return response.data
   }
 
-  static async phoneLogin(data: PhoneLoginData) {
-    const response = await api.post('/auth/phone/login', data)
+  // Phone authentication - CORRECTED
+  static async phoneLoginSendCode(phone: string) {
+    const response = await api.post('/auth/phone/login/send-code', { phone })
     return response.data
   }
 
-  static async phoneSendCode(phone: string) {
-    const response = await api.post('/auth/phone/send-code', { phone })
+  static async phoneLoginVerifyCode(sessionId: string, code: string) {
+    const response = await api.post('/auth/phone/login/verify-code', {
+      session_id: sessionId,
+      code
+    })
     return response.data
   }
 
-  // Phone verification (NEW)
-  static async phoneVerifyCode(phone: string, code: string) {
-    const response = await api.post('/auth/phone/verify', { phone, code })
+  static async phoneLoginResendCode(sessionId: string) {
+    const response = await api.post('/auth/phone/login/resend-code', { session_id: sessionId })
     return response.data
   }
 
@@ -122,6 +112,11 @@ export class AuthAPI {
   // Password management
   static async forgotPassword(email: string) {
     const response = await api.post('/auth/password/forgot', { email })
+    return response.data
+  }
+
+  static async resendResetCode(email: string) {
+    const response = await api.post('/auth/password/resend', { email })
     return response.data
   }
 
@@ -192,6 +187,11 @@ export class AuthAPI {
     return response.data
   }
 
+  static async getDeviceActivity(deviceId: string) {
+    const response = await api.get(`/devices/${deviceId}/activity`)
+    return response.data
+  }
+
   static async trustDevice(deviceId: string) {
     const response = await api.post(`/devices/${deviceId}/trust`)
     return response.data
@@ -209,6 +209,18 @@ export class AuthAPI {
 
   static async checkSuspiciousActivity() {
     const response = await api.get('/devices/security-check')
+    return response.data
+  }
+
+  // Device verification
+  static async verifyDevice(code: string, fingerprint: string) {
+    const response = await api.post('/auth/verify-device', { code, fingerprint })
+    return response.data
+  }
+
+  // Security events
+  static async getSecurityEvents() {
+    const response = await api.get('/auth/security/events')
     return response.data
   }
 

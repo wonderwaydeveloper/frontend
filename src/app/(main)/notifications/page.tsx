@@ -1,18 +1,23 @@
 'use client'
 
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Heart, MessageCircle, UserPlus, Repeat2, Bell, Settings } from 'lucide-react'
 import { formatRelativeTime } from '@/lib/utils'
 import api from '@/lib/api'
 import type { Notification } from '@/types'
 
 export default function NotificationsPage() {
+  const [activeTab, setActiveTab] = useState<'all' | 'mentions'>('all')
   const queryClient = useQueryClient()
 
   const { data: notifications, isLoading } = useQuery({
-    queryKey: ['notifications'],
+    queryKey: ['notifications', activeTab],
     queryFn: async () => {
-      const response = await api.get('/notifications')
-      return response.data as Notification[]
+      const endpoint = activeTab === 'mentions' ? '/notifications/mentions' : '/notifications'
+      const response = await api.get(endpoint)
+      const data = response.data
+      return Array.isArray(data) ? data : (data?.data || data?.notifications || [])
     },
   })
 
@@ -28,78 +33,109 @@ export default function NotificationsPage() {
   const getNotificationIcon = (type: string) => {
     switch (type) {
       case 'like':
-        return '❤️'
+        return <Heart className="w-7 h-7 text-red-500 fill-current" />
       case 'comment':
-        return '💬'
+        return <MessageCircle className="w-7 h-7 text-blue-500" />
       case 'follow':
-        return '👤'
+        return <UserPlus className="w-7 h-7 text-green-500" />
       case 'mention':
-        return '@'
+        return <MessageCircle className="w-7 h-7 text-blue-500" />
       case 'repost':
-        return '🔄'
+        return <Repeat2 className="w-7 h-7 text-green-500" />
       default:
-        return '🔔'
+        return <Bell className="w-7 h-7 text-gray-500" />
     }
   }
 
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
       </div>
     )
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-xl mx-auto">
       {/* Header */}
-      <div className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-gray-200 p-4">
+      <div className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold">Notifications</h1>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Notifications</h1>
+          </div>
+          <button className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+            <Settings className="h-5 w-5 text-gray-700" />
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <div className="flex">
           <button
-            onClick={() => markAllReadMutation.mutate()}
-            disabled={markAllReadMutation.isPending}
-            className="text-blue-600 hover:text-blue-700 font-medium text-sm"
+            onClick={() => setActiveTab('all')}
+            className={`flex-1 py-4 text-center font-medium text-15 transition-colors hover:bg-gray-50 ${
+              activeTab === 'all'
+                ? 'text-gray-900 border-b-2 border-green-600'
+                : 'text-gray-500'
+            }`}
           >
-            Mark all as read
+            All
+          </button>
+          <button
+            onClick={() => setActiveTab('mentions')}
+            className={`flex-1 py-4 text-center font-medium text-15 transition-colors hover:bg-gray-50 ${
+              activeTab === 'mentions'
+                ? 'text-gray-900 border-b-2 border-green-600'
+                : 'text-gray-500'
+            }`}
+          >
+            Mentions
           </button>
         </div>
       </div>
 
       {/* Notifications */}
-      <div className="divide-y divide-gray-200">
-        {notifications?.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <div className="text-4xl mb-4">🔔</div>
-            <p>No notifications yet</p>
+      <div>
+        {Array.isArray(notifications) && notifications.length === 0 ? (
+          <div className="flex flex-col items-center justify-center px-8 py-16">
+            <Bell className="w-16 h-16 text-gray-400 mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Nothing to see here — yet</h2>
+            <p className="text-15 text-gray-500 text-center leading-5">
+              When someone mentions you, you'll find it here.
+            </p>
           </div>
         ) : (
-          notifications?.map((notification) => (
+          Array.isArray(notifications) ? notifications.map((notification) => (
             <div
               key={notification.id}
-              className={`p-4 hover:bg-gray-50 cursor-pointer ${
+              className={`px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 ${
                 !notification.read_at ? 'bg-blue-50' : ''
               }`}
             >
               <div className="flex space-x-3">
-                <div className="text-2xl">
+                <div className="flex-shrink-0">
                   {getNotificationIcon(notification.type)}
                 </div>
-                <div className="flex-1">
-                  <div className="flex items-center space-x-2">
-                    <p className="font-medium">{notification.title}</p>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start space-x-2">
+                    <div className="w-8 h-8 bg-gray-300 rounded-full flex-shrink-0"></div>
+                    <div className="flex-1">
+                      <p className="text-15 text-gray-900 leading-5">
+                        <span className="font-bold">{notification.title}</span> {notification.message}
+                      </p>
+                      <p className="text-15 text-gray-500 mt-1">
+                        {formatRelativeTime(notification.created_at)}
+                      </p>
+                    </div>
                     {!notification.read_at && (
-                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-2"></div>
                     )}
                   </div>
-                  <p className="text-gray-700 mt-1">{notification.message}</p>
-                  <p className="text-gray-500 text-sm mt-2">
-                    {formatRelativeTime(notification.created_at)}
-                  </p>
                 </div>
               </div>
             </div>
-          ))
+          )) : null
         )}
       </div>
     </div>
