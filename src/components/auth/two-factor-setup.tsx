@@ -5,7 +5,8 @@ import { useMutation } from '@tanstack/react-query'
 import { AuthAPI, TwoFactorSetup } from '@/lib/auth-api'
 import { AuthCard, AuthInput, AuthButton } from './auth-components'
 import { QRCodeSVG } from 'qrcode.react'
-import { Copy, Download, Eye, EyeOff } from 'lucide-react'
+import { Copy, Download, Eye, EyeOff, ArrowLeft } from 'lucide-react'
+import { BackupCodesManager } from './backup-codes-manager'
 import toast from 'react-hot-toast'
 
 interface TwoFactorSetupProps {
@@ -14,7 +15,7 @@ interface TwoFactorSetupProps {
 }
 
 export function TwoFactorSetup({ onComplete, onCancel }: TwoFactorSetupProps) {
-  const [step, setStep] = useState<'password' | 'setup' | 'verify'>('password')
+  const [step, setStep] = useState<'password' | 'setup' | 'verify' | 'backup'>('password')
   const [password, setPassword] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [twoFactorData, setTwoFactorData] = useState<TwoFactorSetup | null>(null)
@@ -26,6 +27,13 @@ export function TwoFactorSetup({ onComplete, onCancel }: TwoFactorSetupProps) {
     onSuccess: (data) => {
       setTwoFactorData(data)
       setStep('setup')
+    },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        toast.error(Object.values(error.errors).flat().join(', '))
+      } else {
+        toast.error(error.message || 'Failed to enable 2FA')
+      }
     }
   })
 
@@ -33,8 +41,15 @@ export function TwoFactorSetup({ onComplete, onCancel }: TwoFactorSetupProps) {
     mutationFn: (code: string) => AuthAPI.verify2FA(code),
     onSuccess: (data) => {
       setBackupCodes(data.backup_codes)
-      setStep('verify')
+      setStep('backup')
       toast.success('Two-factor authentication enabled successfully!')
+    },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        toast.error(Object.values(error.errors).flat().join(', '))
+      } else {
+        toast.error(error.message || 'Invalid verification code')
+      }
     }
   })
 
@@ -68,51 +83,77 @@ export function TwoFactorSetup({ onComplete, onCancel }: TwoFactorSetupProps) {
 
   if (step === 'password') {
     return (
-      <AuthCard 
-        title="Enable Two-Factor Authentication" 
-        subtitle="Enter your password to continue"
-      >
-        <form onSubmit={handlePasswordSubmit} className="space-y-6">
-          <AuthInput
-            label="Current Password"
-            type="password"
-            placeholder="Enter your current password"
-            value={password}
-            onChange={setPassword}
-            required
-          />
-          
-          <div className="flex space-x-3">
-            <AuthButton 
-              type="button" 
-              variant="secondary" 
+      <div className="max-w-2xl mx-auto">
+        <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-gray-100 px-4 py-3">
+          <div className="flex items-center space-x-4">
+            <button 
               onClick={onCancel}
-              className="flex-1"
+              className="p-2 hover:bg-gray-50 rounded-full transition-colors"
             >
-              Cancel
-            </AuthButton>
-            <AuthButton 
-              type="submit" 
-              loading={enableMutation.isPending}
-              className="flex-1"
-            >
-              Continue
-            </AuthButton>
+              <ArrowLeft className="h-5 w-5 text-gray-600" />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">Enable Two-Factor Authentication</h1>
+              <p className="text-sm text-gray-600">Enter your password to continue</p>
+            </div>
           </div>
-        </form>
-      </AuthCard>
+        </div>
+        
+        <div className="px-4 py-6">
+          <form onSubmit={handlePasswordSubmit} className="space-y-6">
+            <AuthInput
+              label="Current Password"
+              type="password"
+              placeholder="Enter your current password"
+              value={password}
+              onChange={setPassword}
+              required
+            />
+            
+            <div className="flex space-x-3">
+              <AuthButton 
+                type="button" 
+                variant="secondary" 
+                onClick={onCancel}
+                className="flex-1"
+              >
+                Cancel
+              </AuthButton>
+              <AuthButton 
+                type="submit" 
+                loading={enableMutation.isPending}
+                className="flex-1"
+              >
+                Continue
+              </AuthButton>
+            </div>
+          </form>
+        </div>
+      </div>
     )
   }
 
   if (step === 'setup' && twoFactorData) {
     return (
-      <AuthCard 
-        title="Set up Authenticator App" 
-        subtitle="Scan the QR code with your authenticator app"
-      >
-        <div className="space-y-6">
+      <div className="max-w-2xl mx-auto">
+        <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-gray-100 px-4 py-3">
+          <div className="flex items-center space-x-4">
+            <button 
+              onClick={onCancel}
+              className="p-2 hover:bg-gray-50 rounded-full transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5 text-gray-600" />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">Set up Authenticator App</h1>
+              <p className="text-sm text-gray-600">Scan the QR code with your authenticator app</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="px-4 py-6 space-y-6">
           <div className="flex justify-center">
-            <div className="bg-white p-4 rounded-lg border">
+            <div className="bg-white p-4 rounded-lg border border-gray-100">
               <QRCodeSVG value={twoFactorData.qr_code_url} size={200} />
             </div>
           </div>
@@ -167,86 +208,16 @@ export function TwoFactorSetup({ onComplete, onCancel }: TwoFactorSetupProps) {
             </div>
           </form>
         </div>
-      </AuthCard>
+      </div>
     )
   }
 
-  if (step === 'verify' && backupCodes.length > 0) {
+  if (step === 'backup' && backupCodes.length > 0) {
     return (
-      <AuthCard 
-        title="Save Your Backup Codes" 
-        subtitle="Store these codes safely. Each can only be used once."
-      >
-        <div className="space-y-6">
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <div className="flex items-start">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-yellow-800">
-                  Important: Save these backup codes
-                </h3>
-                <p className="mt-1 text-sm text-yellow-700">
-                  If you lose access to your authenticator app, these codes are the only way to regain access to your account.
-                </p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="block text-sm font-medium text-gray-700">
-                Backup Codes
-              </label>
-              <div className="flex space-x-2">
-                <button
-                  type="button"
-                  onClick={() => setShowBackupCodes(!showBackupCodes)}
-                  className="flex items-center text-sm text-gray-500 hover:text-gray-700"
-                >
-                  {showBackupCodes ? <EyeOff className="w-4 h-4 mr-1" /> : <Eye className="w-4 h-4 mr-1" />}
-                  {showBackupCodes ? 'Hide' : 'Show'}
-                </button>
-                <button
-                  type="button"
-                  onClick={downloadBackupCodes}
-                  className="flex items-center text-sm text-green-600 hover:text-green-500"
-                >
-                  <Download className="w-4 h-4 mr-1" />
-                  Download
-                </button>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-2">
-              {backupCodes.map((code, index) => (
-                <div
-                  key={index}
-                  className={`flex items-center justify-between p-3 bg-gray-100 rounded font-mono text-sm ${
-                    showBackupCodes ? '' : 'filter blur-sm'
-                  }`}
-                >
-                  <span>{code}</span>
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(code)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    <Copy className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-          
-          <AuthButton onClick={onComplete}>
-            I've Saved My Backup Codes
-          </AuthButton>
-        </div>
-      </AuthCard>
+      <BackupCodesManager
+        codes={backupCodes}
+        onClose={onComplete}
+      />
     )
   }
 
@@ -266,6 +237,13 @@ export function TwoFactorDisable({ onComplete, onCancel }: TwoFactorDisableProps
     onSuccess: () => {
       toast.success('Two-factor authentication disabled')
       onComplete()
+    },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        toast.error(Object.values(error.errors).flat().join(', '))
+      } else {
+        toast.error(error.message || 'Failed to disable 2FA')
+      }
     }
   })
 
@@ -276,11 +254,23 @@ export function TwoFactorDisable({ onComplete, onCancel }: TwoFactorDisableProps
   }
 
   return (
-    <AuthCard 
-      title="Disable Two-Factor Authentication" 
-      subtitle="Enter your password to disable 2FA"
-    >
-      <div className="space-y-6">
+    <div className="max-w-2xl mx-auto">
+      <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-gray-100 px-4 py-3">
+        <div className="flex items-center space-x-4">
+          <button 
+            onClick={onCancel}
+            className="p-2 hover:bg-gray-50 rounded-full transition-colors"
+          >
+            <ArrowLeft className="h-5 w-5 text-gray-600" />
+          </button>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Disable Two-Factor Authentication</h1>
+            <p className="text-sm text-gray-600">Enter your password to disable 2FA</p>
+          </div>
+        </div>
+      </div>
+      
+      <div className="px-4 py-6 space-y-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <div className="flex items-start">
             <div className="flex-shrink-0">
@@ -328,6 +318,6 @@ export function TwoFactorDisable({ onComplete, onCancel }: TwoFactorDisableProps
           </div>
         </form>
       </div>
-    </AuthCard>
+    </div>
   )
 }

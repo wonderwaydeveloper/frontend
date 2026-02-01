@@ -9,32 +9,23 @@ export const emailSchema = z.string()
 
 export const phoneSchema = z.string()
   .min(1, ERROR_MESSAGES.PHONE_REQUIRED)
-  .regex(VALIDATION_PATTERNS.PHONE, ERROR_MESSAGES.PHONE_INVALID)
-  .refine((phone) => {
-    const cleanPhone = phone.replace(/[^0-9]/g, '')
-    return cleanPhone.length >= 10 && cleanPhone.length <= 15
-  }, 'Phone number must be between 10-15 digits')
+  .regex(/^09[0-9]{9}$/, ERROR_MESSAGES.PHONE_INVALID)
 
-// Social media standard password (Twitter-like)
+// Strong password with relaxed rules
 export const passwordSchema = z.string()
-  .min(8, 'Password must be at least 8 characters')
+  .min(8, 'The password must be at least 8 characters.')
   .max(128, 'Password must not exceed 128 characters')
   .refine((password) => {
-    return !WEAK_PASSWORDS.includes(password.toLowerCase() as any)
-  }, 'This password is too common. Please choose a different one.')
+    // At least one letter (uppercase OR lowercase)
+    return /[a-zA-Z]/.test(password)
+  }, 'The password must contain at least one letter.')
   .refine((password) => {
-    // For social media: encourage but don't enforce complexity
-    // Only require complexity if password is short
-    if (password.length >= 12) return true
-    
-    const hasLower = /[a-z]/.test(password)
-    const hasUpper = /[A-Z]/.test(password)
-    const hasNumber = /[0-9]/.test(password)
-    const hasSpecial = /[^A-Za-z0-9]/.test(password)
-    
-    const complexity = [hasLower, hasUpper, hasNumber, hasSpecial].filter(Boolean).length
-    return complexity >= 2
-  }, 'Password should be longer or include a mix of letters, numbers, and symbols.')
+    // At least one number
+    return /[0-9]/.test(password)
+  }, 'The password must contain at least one number.')
+  .refine((password) => {
+    return !WEAK_PASSWORDS.includes(password.toLowerCase() as any)
+  }, 'The password is too weak.')
 
 // Username matching backend regex
 export const usernameSchema = z.string()
@@ -47,10 +38,10 @@ export const codeSchema = z.string()
   .length(6, ERROR_MESSAGES.TWO_FACTOR_REQUIRED)
   .regex(VALIDATION_PATTERNS.CODE_NUMERIC, ERROR_MESSAGES.TWO_FACTOR_INVALID)
 
-// Name validation
+// Name validation matching backend controller (max 50)
 export const nameSchema = z.string()
   .min(1, ERROR_MESSAGES.NAME_REQUIRED)
-  .max(255, ERROR_MESSAGES.NAME_MAX_LENGTH)
+  .max(50, 'Name must be less than 50 characters')
 
 // Age validation matching backend date validation
 export const dateOfBirthSchema = z.string()
@@ -67,9 +58,9 @@ export const dateOfBirthSchema = z.string()
     const monthDiff = today.getMonth() - birthDate.getMonth()
     
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      return age - 1 >= 13
+      return age - 1 >= 15
     }
-    return age >= 13
+    return age >= 15
   }, ERROR_MESSAGES.AGE_MINIMUM)
 
 // Login schemas matching backend LoginRequest
@@ -81,6 +72,8 @@ export const loginSchema = z.object({
 
 // Multi-step registration schemas
 export const registerStep1Schema = z.object({
+  name: nameSchema,
+  date_of_birth: dateOfBirthSchema,
   contact: z.string().min(1, 'Contact is required'),
   contact_type: z.enum(['email', 'phone'])
 }).refine((data) => {
@@ -99,13 +92,11 @@ export const registerStep2Schema = z.object({
   code: codeSchema
 })
 
-// Step 3 matching backend PhoneRegisterRequest
+// Step 3 matching backend - only username and password needed
 export const registerStep3Schema = z.object({
-  name: nameSchema,
   username: usernameSchema,
   password: passwordSchema,
-  password_confirmation: z.string(),
-  date_of_birth: dateOfBirthSchema
+  password_confirmation: z.string().min(1, 'Password confirmation is required')
 }).refine((data) => data.password === data.password_confirmation, {
   message: ERROR_MESSAGES.PASSWORD_MISMATCH,
   path: ['password_confirmation']
@@ -126,6 +117,21 @@ export const phoneLoginStep2Schema = z.object({
   verification_code: codeSchema
 })
 
+// Phone registration schema
+export const phoneRegisterSchema = z.object({
+  phone: phoneSchema,
+  name: nameSchema,
+  username: usernameSchema,
+  email: emailSchema.optional(),
+  password: passwordSchema,
+  password_confirmation: z.string().min(1, 'Password confirmation is required'),
+  date_of_birth: dateOfBirthSchema,
+  verification_code: codeSchema
+}).refine((data) => data.password === data.password_confirmation, {
+  message: ERROR_MESSAGES.PASSWORD_MISMATCH,
+  path: ['password_confirmation']
+})
+
 // Password reset schemas
 export const forgotPasswordStep1Schema = z.object({
   email: emailSchema
@@ -140,7 +146,7 @@ export const forgotPasswordStep3Schema = z.object({
   email: emailSchema,
   code: codeSchema,
   password: passwordSchema,
-  password_confirmation: z.string()
+  password_confirmation: z.string().min(1, 'Password confirmation is required')
 }).refine((data) => data.password === data.password_confirmation, {
   message: ERROR_MESSAGES.PASSWORD_MISMATCH,
   path: ['password_confirmation']
@@ -156,7 +162,7 @@ export const emailVerifySchema = z.object({
 export const changePasswordSchema = z.object({
   current_password: z.string().min(1, 'Current password is required'),
   password: passwordSchema,
-  password_confirmation: z.string()
+  password_confirmation: z.string().min(1, 'Password confirmation is required')
 }).refine((data) => data.password === data.password_confirmation, {
   message: ERROR_MESSAGES.PASSWORD_MISMATCH,
   path: ['password_confirmation']
@@ -175,15 +181,67 @@ export const disable2FASchema = z.object({
   password: z.string().min(1, 'Password is required')
 })
 
+// Age verification schema for social auth
+export const ageVerificationSchema = z.object({
+  date_of_birth: dateOfBirthSchema
+})
+
 // Utility function to handle Zod errors
 export const handleZodError = (error: z.ZodError): Record<string, string[]> => {
   const errors: Record<string, string[]> = {}
   if (error.errors) {
     error.errors.forEach((err) => {
-      const path = err.path.join('.')
+      const path = err.path.join('.') || 'general'
       if (!errors[path]) errors[path] = []
       errors[path].push(err.message)
     })
   }
   return errors
+}
+
+// Input sanitization utilities
+export const sanitizeInput = {
+  login: (value: string) => value.trim().toLowerCase(),
+  phone: (value: string) => value.replace(/[^0-9]/g, ''),
+  code: (value: string) => value.replace(/[^0-9]/g, '').slice(0, 6),
+  username: (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '')
+}
+
+// Field validation utilities
+export const validateField = {
+  email: (value: string) => {
+    const result = emailSchema.safeParse(value)
+    return result.success ? [] : result.error.issues.map(e => e.message)
+  },
+  password: (value: string) => {
+    const result = passwordSchema.safeParse(value)
+    return result.success ? [] : result.error.issues.map(e => e.message)
+  },
+  username: (value: string) => {
+    const result = usernameSchema.safeParse(value)
+    return result.success ? [] : result.error.issues.map(e => e.message)
+  }
+}
+
+// Password strength calculator
+export const calculatePasswordStrength = (password: string) => {
+  let score = 0
+  const feedback: string[] = []
+  
+  if (password.length >= 8) score += 20
+  else feedback.push('Use at least 8 characters')
+  
+  if (/[a-z]/.test(password)) score += 20
+  else feedback.push('Add lowercase letters')
+  
+  if (/[A-Z]/.test(password)) score += 20
+  else feedback.push('Add uppercase letters')
+  
+  if (/[0-9]/.test(password)) score += 20
+  else feedback.push('Add numbers')
+  
+  if (/[^a-zA-Z0-9]/.test(password)) score += 20
+  else feedback.push('Add special characters')
+  
+  return { score, feedback }
 }

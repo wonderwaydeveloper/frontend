@@ -45,13 +45,13 @@ export default function ProfilePage() {
       
       switch (activeTab) {
         case 'replies':
-          endpoint = `/users/${user.id}/replies`
+          endpoint = `/users/${user.id}/posts?type=replies`
           break
         case 'media':
           endpoint = `/users/${user.id}/media`
           break
         case 'likes':
-          endpoint = `/users/${user.id}/likes`
+          endpoint = `/users/${user.id}/posts?type=likes`
           break
         default:
           endpoint = `/users/${user.id}/posts`

@@ -7,7 +7,7 @@ export const ERROR_MESSAGES = {
   
   // Registration errors
   NAME_REQUIRED: 'Name is required',
-  NAME_MAX_LENGTH: 'Name must be less than 255 characters',
+  NAME_MAX_LENGTH: 'Name must be less than 50 characters',
   USERNAME_REQUIRED: 'Username is required',
   USERNAME_MAX_LENGTH: 'Username must be 4-15 characters',
   USERNAME_FORMAT: 'Username must be 4-15 characters, start with letter/underscore, contain only letters, numbers, and underscores',
@@ -34,7 +34,7 @@ export const ERROR_MESSAGES = {
   // Date errors
   DATE_REQUIRED: 'Date of birth is required',
   DATE_FUTURE: 'Date of birth must be before today',
-  AGE_MINIMUM: 'You must be at least 13 years old',
+  AGE_MINIMUM: 'You must be at least 15 years old to register',
   
   // General errors
   REQUIRED_FIELD: 'This field is required',

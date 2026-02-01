@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
-import api from '@/lib/api'
+import { AuthAPI } from '@/lib/auth-api'
 import { AuthCard, AuthInput, AuthButton, AuthDivider, SocialButton } from '@/components/auth/auth-components'
 import { registerStep1Schema, registerStep3Schema, handleZodError } from '@/lib/validation'
 import { z } from 'zod'
@@ -50,7 +50,7 @@ export default function RegisterPage() {
             setSessionId(parsed.sessionId || '')
             setContact(parsed.contact || '')
             setContactType(parsed.contactType || 'email')
-            setFormData(parsed.formData || formData)
+            setFormData(prev => ({ ...prev, ...parsed.formData }))
             
             // If we're on step 2, start a shorter timer
             if (parsed.step === 2) {
@@ -82,10 +82,8 @@ export default function RegisterPage() {
   // Auto-submit when code is complete
   const handleCodeChange = (value: string) => {
     setCode(value)
-    if (value.length === 6) {
-      setTimeout(() => {
-        step2Mutation.mutate({ session_id: sessionId, code: value })
-      }, 100)
+    if (value.length === 6 && !step2Mutation.isPending) {
+      step2Mutation.mutate({ session_id: sessionId, code: value })
     }
   }
 
@@ -109,7 +107,11 @@ export default function RegisterPage() {
 
   const validateStep3 = () => {
     try {
-      registerStep3Schema.parse(formData)
+      registerStep3Schema.parse({
+        username: formData.username,
+        password: formData.password,
+        password_confirmation: formData.password_confirmation
+      })
       setErrors({})
       return true
     } catch (error) {
@@ -127,8 +129,7 @@ export default function RegisterPage() {
       contact: string; 
       contact_type: string 
     }) => {
-      const response = await api.post('/auth/register/step1', data)
-      return response.data
+      return await AuthAPI.registerStep1(data.name, data.date_of_birth, data.contact, data.contact_type as 'email' | 'phone')
     },
     onSuccess: (data) => {
       setSessionId(data.session_id)
@@ -146,12 +147,18 @@ export default function RegisterPage() {
         formData
       })
     },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        setErrors({ contact: [error.message || 'Registration failed'] })
+      }
+    },
   })
 
   const step2Mutation = useMutation({
     mutationFn: async (data: { session_id: string; code: string }) => {
-      const response = await api.post('/auth/register/step2', data)
-      return response.data
+      return await AuthAPI.registerStep2(data.session_id, data.code)
     },
     onSuccess: () => {
       setStep(3)
@@ -163,28 +170,40 @@ export default function RegisterPage() {
         formData
       })
     },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        setErrors({ code: [error.message || 'Invalid verification code'] })
+      }
+    },
   })
 
   const step3Mutation = useMutation({
-    mutationFn: async (data: any) => {
-      const response = await api.post('/auth/register/step3', {
-        session_id: sessionId,
-        ...data,
-      })
-      return response.data
+    mutationFn: async (data: {
+      session_id: string
+      username: string
+      password: string
+      password_confirmation: string
+    }) => {
+      return await AuthAPI.registerStep3(data.session_id, data.username, data.password, data.password_confirmation)
     },
     onSuccess: async (data) => {
       clearSessionData()
       await login(data.token)
     },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        setErrors({ username: [error.message || 'Registration failed'] })
+      }
+    },
   })
 
   const resendCodeMutation = useMutation({
     mutationFn: async () => {
-      const response = await api.post('/auth/register/resend-code', {
-        session_id: sessionId
-      })
-      return response.data
+      return await AuthAPI.resendRegistrationCode(sessionId)
     },
     onSuccess: (data) => {
       setSessionId(data.session_id)
@@ -193,16 +212,15 @@ export default function RegisterPage() {
       setCode('')
     },
     onError: (error: any) => {
-      if (error.response?.status === 429) {
-        const errorData = error.response.data
-        if (errorData.retry_after) {
-          const remainingTime = errorData.retry_after - Math.floor(Date.now() / 1000)
+      if (error.status === 429) {
+        if (error.retry_after) {
+          const remainingTime = error.retry_after - Math.floor(Date.now() / 1000)
           setResendTimer(Math.max(0, remainingTime))
-        } else if (errorData.resend_available_at) {
-          const remainingTime = errorData.resend_available_at - Math.floor(Date.now() / 1000)
+        } else if (error.resend_available_at) {
+          const remainingTime = error.resend_available_at - Math.floor(Date.now() / 1000)
           setResendTimer(Math.max(0, remainingTime))
-        } else if (errorData.remaining_seconds) {
-          setResendTimer(errorData.remaining_seconds)
+        } else if (error.remaining_seconds) {
+          setResendTimer(error.remaining_seconds)
         }
       }
     },
@@ -226,8 +244,17 @@ export default function RegisterPage() {
 
   const handleStep3 = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!sessionId) {
+      setErrors({ session: ['Session expired. Please start over.'] })
+      return
+    }
     if (!validateStep3()) return
-    step3Mutation.mutate(formData)
+    step3Mutation.mutate({
+      session_id: sessionId,
+      username: formData.username,
+      password: formData.password,
+      password_confirmation: formData.password_confirmation
+    })
   }
 
   const handleResendCode = () => {
@@ -241,10 +268,9 @@ export default function RegisterPage() {
       <AuthCard title="Create your account" subtitle="Step 1 of 3: Basic information">
         <form onSubmit={handleStep1} className="space-y-6">
           <AuthInput
-            label="Full Name"
+            label="Name"
             type="text"
-            placeholder="Enter your full name"
-            fieldType="text"
+            placeholder="Enter your name"
             value={formData.name}
             onChange={(value) => setFormData({ ...formData, name: value })}
             error={errors.name}
@@ -309,12 +335,9 @@ export default function RegisterPage() {
           </AuthButton>
         </form>
         
-        <AuthDivider text="Or sign up with" />
+        <AuthDivider text="Or" />
         
-        <div className="grid grid-cols-2 gap-3">
-          <SocialButton provider="google" href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/google`} />
-          <SocialButton provider="apple" href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/apple`} />
-        </div>
+        <SocialButton provider="google" href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/google`} />
         
         <div className="text-center mt-4">
           <Link href="/login" className="text-sm text-green-600 hover:text-green-500 hover:underline">
@@ -338,6 +361,7 @@ export default function RegisterPage() {
             fieldType="code"
             value={code}
             onChange={handleCodeChange}
+            error={errors.code}
           />
           
           <AuthButton type="submit" loading={step2Mutation.isPending}>

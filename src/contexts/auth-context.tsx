@@ -115,7 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Register device for security
       try {
         const deviceInfo = AuthAPI.getDeviceInfo()
-        await AuthAPI.registerDevice(deviceInfo)
+        await AuthAPI.registerAdvancedDevice(deviceInfo)
       } catch (error) {
         console.warn('Device registration failed:', error)
       }

@@ -5,11 +5,12 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
-import api from '@/lib/api'
+import { AuthAPI } from '@/lib/auth-api'
 import { AuthCard, AuthInput, AuthButton, AuthDivider, SocialButton } from '@/components/auth/auth-components'
 import { loginSchema, phoneLoginStep1Schema, phoneLoginStep2Schema, codeSchema, handleZodError } from '@/lib/validation'
 import { z } from 'zod'
-import type { LoginCredentials } from '@/types'
+import toast from 'react-hot-toast'
+import type { LoginCredentials } from '@/types/auth'
 
 export default function LoginPage() {
   const [loginType, setLoginType] = useState<'email' | 'phone'>(() => {
@@ -63,6 +64,8 @@ export default function LoginPage() {
   const [requiresDeviceVerification, setRequiresDeviceVerification] = useState(false)
   const [deviceFingerprint, setDeviceFingerprint] = useState('')
   const [deviceVerificationCode, setDeviceVerificationCode] = useState('')
+  const [deviceResendAvailableAt, setDeviceResendAvailableAt] = useState<number | null>(null)
+  const [deviceResendTimeLeft, setDeviceResendTimeLeft] = useState<number>(0)
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   
@@ -88,10 +91,15 @@ export default function LoginPage() {
         const remaining = rateLimitEndTime - now
         setRateLimitTimeLeft(Math.max(0, remaining))
       }
+      
+      if (deviceResendAvailableAt) {
+        const remaining = deviceResendAvailableAt - now
+        setDeviceResendTimeLeft(Math.max(0, remaining))
+      }
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [codeExpiresAt, resendAvailableAt, rateLimitEndTime])
+  }, [codeExpiresAt, resendAvailableAt, rateLimitEndTime, deviceResendAvailableAt])
 
   // Auto-submit when code is complete
   useEffect(() => {
@@ -148,7 +156,7 @@ export default function LoginPage() {
       return true
     } catch (error) {
       if (error instanceof z.ZodError) {
-        setErrors({ twoFactorCode: error.errors.map(e => e.message) })
+        setErrors({ twoFactorCode: error.issues.map(e => e.message) })
       }
       return false
     }
@@ -161,7 +169,7 @@ export default function LoginPage() {
       return true
     } catch (error) {
       if (error instanceof z.ZodError) {
-        setErrors({ deviceVerificationCode: error.errors.map(e => e.message) })
+        setErrors({ deviceVerificationCode: error.issues.map(e => e.message) })
       }
       return false
     }
@@ -169,25 +177,32 @@ export default function LoginPage() {
 
   const emailLoginMutation = useMutation({
     mutationFn: async (data: LoginCredentials) => {
-      const response = await api.post('/auth/login', data)
-      return response.data
+      return await AuthAPI.login(data)
     },
     onSuccess: async (data) => {
       if (data.requires_2fa) {
         setRequires2FA(true)
       } else if (data.requires_device_verification) {
-        setRequiresDeviceVerification(true)
-        setDeviceFingerprint(data.fingerprint)
+        localStorage.setItem('device_fingerprint', data.fingerprint)
+        localStorage.setItem('device_resend_time', data.resend_available_at?.toString() || '0')
+        router.push(`/device-verification?fingerprint=${data.fingerprint}`)
+        return
       } else {
         await login(data.token)
+      }
+    },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        toast.error(error.message || 'Login failed')
       }
     },
   })
 
   const phoneSendCodeMutation = useMutation({
     mutationFn: async (data: { phone: string }) => {
-      const response = await api.post('/auth/phone/login/send-code', data)
-      return response.data
+      return await AuthAPI.phoneLoginSendCode(data.phone)
     },
     onSuccess: (data) => {
       setSessionId(data.session_id)
@@ -201,19 +216,27 @@ export default function LoginPage() {
       localStorage.setItem('loginResendAvailableAt', data.resend_available_at.toString())
       localStorage.setItem('loginStep', '2')
     },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        toast.error(error.message || 'Failed to send code')
+      }
+    },
   })
 
   const phoneLoginMutation = useMutation({
     mutationFn: async (data: { session_id: string; code: string }) => {
-      const response = await api.post('/auth/phone/login/verify-code', data)
-      return response.data
+      return await AuthAPI.phoneLoginVerifyCode(data.session_id, data.code)
     },
     onSuccess: async (data) => {
       if (data.requires_2fa) {
         setRequires2FA(true)
       } else if (data.requires_device_verification) {
-        setRequiresDeviceVerification(true)
-        setDeviceFingerprint(data.fingerprint)
+        localStorage.setItem('device_fingerprint', data.fingerprint)
+        localStorage.setItem('device_resend_time', data.resend_available_at?.toString() || '0')
+        router.push(`/device-verification?fingerprint=${data.fingerprint}`)
+        return
       } else {
         // Clear login data on successful login
         localStorage.removeItem('loginStep')
@@ -225,12 +248,18 @@ export default function LoginPage() {
         await login(data.token)
       }
     },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        toast.error(error.message || 'Login failed')
+      }
+    },
   })
 
   const phoneResendCodeMutation = useMutation({
     mutationFn: async () => {
-      const response = await api.post('/auth/phone/login/resend-code', { session_id: sessionId })
-      return response.data
+      return await AuthAPI.phoneLoginResendCode(sessionId)
     },
     onSuccess: (data) => {
       setCodeExpiresAt(data.code_expires_at)
@@ -241,19 +270,18 @@ export default function LoginPage() {
       localStorage.setItem('loginResendAvailableAt', data.resend_available_at.toString())
     },
     onError: (error: any) => {
-      if (error.response?.status === 429 && error.response?.data?.retry_after) {
-        setRateLimitEndTime(error.response.data.retry_after)
+      if (error.status === 429 && error.retry_after) {
+        setRateLimitEndTime(error.retry_after)
       }
     },
   })
 
   const verify2FAMutation = useMutation({
     mutationFn: async (code: string) => {
-      const response = await api.post('/auth/login', {
+      return await AuthAPI.login({
         ...credentials,
         two_factor_code: code
       })
-      return response.data
     },
     onSuccess: async (data) => {
       if (data.requires_device_verification) {
@@ -264,18 +292,47 @@ export default function LoginPage() {
         await login(data.token)
       }
     },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        toast.error(error.message || '2FA verification failed')
+      }
+    },
   })
 
   const verifyDeviceMutation = useMutation({
     mutationFn: async (code: string) => {
-      const response = await api.post('/auth/verify-device', {
-        code,
-        fingerprint: deviceFingerprint
-      })
-      return response.data
+      return await AuthAPI.verifyDevice(code, deviceFingerprint)
     },
     onSuccess: async (data) => {
       await login(data.token)
+    },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        toast.error(error.message || 'Device verification failed')
+      }
+    },
+  })
+
+  const resendDeviceCodeMutation = useMutation({
+    mutationFn: async () => {
+      return await AuthAPI.resendDeviceCode(deviceFingerprint)
+    },
+    onSuccess: (data) => {
+      if (data.resend_available_at) {
+        setDeviceResendAvailableAt(data.resend_available_at)
+      }
+      toast.success('New verification code sent')
+    },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        toast.error(error.message || 'Failed to send code')
+      }
     },
   })
 
@@ -318,6 +375,8 @@ export default function LoginPage() {
     setRequiresDeviceVerification(false)
     setDeviceFingerprint('')
     setDeviceVerificationCode('')
+    setDeviceResendAvailableAt(null)
+    setDeviceResendTimeLeft(0)
     setTwoFactorCode('')
     setErrors({})
     
@@ -342,8 +401,9 @@ export default function LoginPage() {
             maxLength={6}
             placeholder="000000"
             className="text-center text-2xl tracking-widest"
+            fieldType="code"
             value={deviceVerificationCode}
-            onChange={(e) => setDeviceVerificationCode(e.target.value.replace(/\D/g, ''))}
+            onChange={(value) => setDeviceVerificationCode(value.replace(/\D/g, ''))}
             error={errors.deviceVerificationCode}
           />
           
@@ -351,14 +411,30 @@ export default function LoginPage() {
             Verify Device
           </AuthButton>
           
-          <div className="text-center">
+          <div className="text-center space-y-2">
             <button
               type="button"
-              onClick={resetForm}
-              className="text-green-600 hover:text-green-500 text-sm"
+              onClick={() => resendDeviceCodeMutation.mutate()}
+              disabled={resendDeviceCodeMutation.isPending || deviceResendTimeLeft > 0}
+              className="text-green-600 hover:text-green-500 text-sm disabled:opacity-50"
             >
-              Back to login
+              {resendDeviceCodeMutation.isPending 
+                ? 'Sending...' 
+                : deviceResendTimeLeft > 0 
+                  ? `Resend in ${deviceResendTimeLeft}s`
+                  : 'Resend code'
+              }
             </button>
+            
+            <div>
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-green-600 hover:text-green-500 text-sm"
+              >
+                Back to login
+              </button>
+            </div>
           </div>
         </form>
       </AuthCard>
@@ -378,8 +454,9 @@ export default function LoginPage() {
             maxLength={6}
             placeholder="000000"
             className="text-center text-2xl tracking-widest"
+            fieldType="code"
             value={twoFactorCode}
-            onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, ''))}
+            onChange={(value) => setTwoFactorCode(value.replace(/\D/g, ''))}
             error={errors.twoFactorCode}
           />
           
@@ -544,18 +621,12 @@ export default function LoginPage() {
         )}
       </form>
 
-      <AuthDivider text="Or continue with" />
+      <AuthDivider text="Or" />
       
-      <div className="grid grid-cols-2 gap-3">
-        <SocialButton 
-          provider="google" 
-          href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/google`} 
-        />
-        <SocialButton 
-          provider="apple" 
-          href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/apple`} 
-        />
-      </div>
+      <SocialButton 
+        provider="google" 
+        href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/google`} 
+      />
 
       <div className="mt-6 space-y-4">
         <div className="text-center">

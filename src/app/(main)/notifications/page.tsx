@@ -14,7 +14,7 @@ export default function NotificationsPage() {
   const { data: notifications, isLoading } = useQuery({
     queryKey: ['notifications', activeTab],
     queryFn: async () => {
-      const endpoint = activeTab === 'mentions' ? '/notifications/mentions' : '/notifications'
+      const endpoint = activeTab === 'mentions' ? '/mentions/my-mentions' : '/notifications'
       const response = await api.get(endpoint)
       const data = response.data
       return Array.isArray(data) ? data : (data?.data || data?.notifications || [])

@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/auth-context'
 import { AuthCard, AuthInput, AuthButton } from '@/components/auth/auth-components'
 import { ageVerificationSchema, handleZodError } from '@/lib/validation'
 import { z } from 'zod'
-import api from '@/lib/api'
+import { AuthAPI } from '@/lib/auth-api'
 
 export default function AgeVerificationPage() {
   const [dateOfBirth, setDateOfBirth] = useState('')
@@ -30,14 +30,18 @@ export default function AgeVerificationPage() {
 
   const verifyAgeMutation = useMutation({
     mutationFn: async (dateOfBirth: string) => {
-      const response = await api.post('/auth/social/complete-age-verification', {
-        date_of_birth: dateOfBirth
-      })
-      return response.data
+      return await AuthAPI.completeAgeVerification(dateOfBirth)
     },
     onSuccess: (data) => {
       updateUser(data.user)
       router.push('/timeline')
+    },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        setErrors({ general: [error.message || 'Age verification failed'] })
+      }
     },
   })
 

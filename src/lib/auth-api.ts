@@ -1,5 +1,48 @@
 import api from './api'
 import { AuthStorage } from './auth-storage'
+import toast from 'react-hot-toast'
+
+// Error handling utility
+class AuthError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public errors?: Record<string, string[]>
+  ) {
+    super(message)
+    this.name = 'AuthError'
+  }
+}
+
+// Handle API errors consistently
+const handleApiError = (error: any): never => {
+  if (error.response) {
+    const { status, data } = error.response
+    
+    // Handle validation errors (422)
+    if (status === 422 && data.errors) {
+      throw new AuthError('Validation failed', status, data.errors)
+    }
+    
+    // Handle rate limiting (429)
+    if (status === 429) {
+      const message = data.error || data.message || 'Too many requests'
+      const authError = new AuthError(message, status)
+      // Add rate limit data to error
+      ;(authError as any).retry_after = data.retry_after
+      ;(authError as any).resend_available_at = data.resend_available_at
+      ;(authError as any).remaining_seconds = data.remaining_seconds
+      throw authError
+    }
+    
+    // Handle other errors with message
+    const message = data.error || data.message || 'An error occurred'
+    throw new AuthError(message, status)
+  }
+  
+  // Network or other errors
+  throw new AuthError('Network error. Please check your connection.', 0)
+}
 
 export interface MultiStepRegistrationData {
   name: string
@@ -42,176 +85,406 @@ export interface TwoFactorSetup {
 
 export class AuthAPI {
   // Multi-step registration
-  static async registerStep1(data: MultiStepRegistrationData) {
-    const response = await api.post('/auth/register/step1', data)
-    return response.data
+  static async registerStep1(name: string, dateOfBirth: string, contact: string, contactType: 'email' | 'phone') {
+    try {
+      const response = await api.post('/auth/register/step1', {
+        name,
+        date_of_birth: dateOfBirth,
+        contact,
+        contact_type: contactType
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async registerStep2(sessionId: string, code: string) {
-    const response = await api.post('/auth/register/step2', {
-      session_id: sessionId,
-      code
-    })
-    return response.data
+    try {
+      const response = await api.post('/auth/register/step2', {
+        session_id: sessionId,
+        code
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
-  static async registerStep3(data: CompleteRegistrationData) {
-    const response = await api.post('/auth/register/step3', data)
-    return response.data
+  static async registerStep3(sessionId: string, username: string, password: string, passwordConfirmation: string) {
+    try {
+      const response = await api.post('/auth/register/step3', {
+        session_id: sessionId,
+        username,
+        password,
+        password_confirmation: passwordConfirmation
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  }
+
+  static async resendRegistrationCode(sessionId: string) {
+    try {
+      const response = await api.post('/auth/register/resend-code', { session_id: sessionId })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   // Login methods
   static async login(data: LoginData) {
-    const response = await api.post('/auth/login', data)
-    return response.data
+    try {
+      const response = await api.post('/auth/login', data)
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
-  static async phoneLogin(data: PhoneLoginData) {
-    const response = await api.post('/auth/phone/login/verify-code', {
-      session_id: data.phone, // This should be session_id from send-code response
-      code: data.verification_code
-    })
-    return response.data
+  // Phone login methods
+  static async phoneLoginSendCode(phone: string) {
+    try {
+      const response = await api.post('/auth/phone/login/send-code', { phone })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
-  static async phoneSendCode(phone: string) {
-    const response = await api.post('/auth/phone/login/send-code', { phone })
-    return response.data
+  static async phoneLoginVerifyCode(sessionId: string, code: string) {
+    try {
+      const response = await api.post('/auth/phone/login/verify-code', {
+        session_id: sessionId,
+        code: code
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
-  static async phoneResendCode(sessionId: string) {
-    const response = await api.post('/auth/phone/login/resend-code', { session_id: sessionId })
-    return response.data
+  static async phoneLoginResendCode(sessionId: string) {
+    try {
+      const response = await api.post('/auth/phone/login/resend-code', { session_id: sessionId })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   // Social authentication
-  static getSocialAuthUrl(provider: 'google' | 'apple') {
+  static getSocialAuthUrl(provider: 'google') {
     return `${process.env.NEXT_PUBLIC_API_URL}/auth/social/${provider}`
   }
 
   static async handleSocialCallback(provider: string, code: string, state?: string) {
-    const response = await api.get(`/auth/social/${provider}/callback`, {
-      params: { code, state }
-    })
-    return response.data
+    try {
+      const response = await api.get(`/auth/social/${provider}/callback`, {
+        params: { code, state }
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async completeAgeVerification(dateOfBirth: string) {
-    const response = await api.post('/auth/social/complete-age-verification', {
-      date_of_birth: dateOfBirth
-    })
-    return response.data
+    try {
+      const response = await api.post('/auth/social/complete-age-verification', {
+        date_of_birth: dateOfBirth
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   // Password management
   static async forgotPassword(email: string) {
-    const response = await api.post('/auth/password/forgot', { email })
-    return response.data
+    try {
+      const response = await api.post('/auth/password/forgot', { email })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
-  static async verifyResetCode(email: string, code: string) {
-    const response = await api.post('/auth/password/verify-code', { email, code })
-    return response.data
+  static async verifyPasswordResetCode(email: string, code: string) {
+    try {
+      const response = await api.post('/auth/password/verify-code', { email, code })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  }
+
+  static async resendPasswordReset(email: string) {
+    try {
+      const response = await api.post('/auth/password/resend', { email })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async resetPassword(email: string, code: string, password: string, passwordConfirmation: string) {
-    const response = await api.post('/auth/password/reset', {
-      email,
-      code,
-      password,
-      password_confirmation: passwordConfirmation
-    })
-    return response.data
+    try {
+      const response = await api.post('/auth/password/reset', {
+        email,
+        code,
+        password,
+        password_confirmation: passwordConfirmation
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async changePassword(currentPassword: string, password: string, passwordConfirmation: string) {
-    const response = await api.post('/auth/password/change', {
-      current_password: currentPassword,
-      password,
-      password_confirmation: passwordConfirmation
-    })
-    return response.data
+    try {
+      const response = await api.post('/auth/password/change', {
+        current_password: currentPassword,
+        password,
+        password_confirmation: passwordConfirmation
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   // Email verification
   static async verifyEmail(email: string, code: string) {
-    const response = await api.post('/auth/email/verify', { email, code })
-    return response.data
+    try {
+      const response = await api.post('/auth/email/verify', { email, code })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async resendEmailVerification(email: string) {
-    const response = await api.post('/auth/email/resend', { email })
-    return response.data
+    try {
+      const response = await api.post('/auth/email/resend', { email })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async getEmailVerificationStatus() {
-    const response = await api.get('/auth/email/status')
-    return response.data
+    try {
+      const response = await api.get('/auth/email/status')
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   // Two-factor authentication
   static async enable2FA(password: string): Promise<TwoFactorSetup> {
-    const response = await api.post('/auth/2fa/enable', { password })
-    return response.data
+    try {
+      const response = await api.post('/auth/2fa/enable', { password })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async verify2FA(code: string): Promise<{ backup_codes: string[] }> {
-    const response = await api.post('/auth/2fa/verify', { code })
-    return response.data
+    try {
+      const response = await api.post('/auth/2fa/verify', { code })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async disable2FA(password: string) {
-    const response = await api.post('/auth/2fa/disable', { password })
-    return response.data
+    try {
+      const response = await api.post('/auth/2fa/disable', { password })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
-  // Device management
-  static async registerDevice(deviceInfo: DeviceInfo) {
-    const response = await api.post('/devices/advanced/register', deviceInfo)
-    return response.data
+  // Phone registration - using multi-step registration instead
+  static async phoneRegisterStep1(data: {
+    name: string
+    date_of_birth: string
+    phone: string
+  }) {
+    try {
+      const response = await api.post('/auth/register/step1', {
+        name: data.name,
+        date_of_birth: data.date_of_birth,
+        contact: data.phone,
+        contact_type: 'phone'
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  }
+
+  static async phoneRegisterStep2(sessionId: string, code: string) {
+    try {
+      const response = await api.post('/auth/register/step2', {
+        session_id: sessionId,
+        code
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  }
+
+  static async phoneRegisterStep3(data: {
+    session_id: string
+    username: string
+    password: string
+    password_confirmation: string
+    email?: string
+  }) {
+    try {
+      const response = await api.post('/auth/register/step3', data)
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  }
+
+  // Device verification
+  static async verifyDevice(code: string, fingerprint: string) {
+    try {
+      const response = await api.post('/auth/verify-device', {
+        code,
+        fingerprint
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  }
+
+  static async resendDeviceCode(fingerprint: string) {
+    try {
+      const response = await api.post('/auth/resend-device-code', {
+        fingerprint
+      })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  }
+
+  // Security events
+  static async getSecurityEvents() {
+    try {
+      const response = await api.get('/auth/security/events')
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async getDevices() {
-    const response = await api.get('/devices/list')
-    return response.data
+    try {
+      const response = await api.get('/devices/list')
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
-  static async trustDevice(deviceId: string) {
-    const response = await api.post(`/devices/${deviceId}/trust`)
-    return response.data
+  static async trustDevice(deviceId: string, password: string) {
+    try {
+      const response = await api.post(`/devices/${deviceId}/trust`, { password })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async revokeDevice(deviceId: string) {
-    const response = await api.delete(`/devices/${deviceId}/revoke`)
-    return response.data
+    try {
+      const response = await api.delete(`/devices/${deviceId}/revoke`)
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
-  static async revokeAllDevices() {
-    const response = await api.post('/devices/revoke-all')
-    return response.data
+  static async revokeAllDevices(password: string) {
+    try {
+      const response = await api.post('/devices/revoke-all', { password })
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  }
+
+  // Advanced device management
+  static async registerAdvancedDevice(deviceInfo: DeviceInfo) {
+    try {
+      const response = await api.post('/devices/advanced/register', deviceInfo)
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
+  }
+
+  static async getDeviceActivity(deviceId: string) {
+    try {
+      const response = await api.get(`/devices/${deviceId}/activity`)
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async checkSuspiciousActivity() {
-    const response = await api.get('/devices/security-check')
-    return response.data
+    try {
+      const response = await api.get('/devices/security-check')
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   // Session management
   static async getCurrentUser() {
-    const response = await api.get('/auth/me')
-    return response.data
+    try {
+      const response = await api.get('/auth/me')
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async logout() {
-    const response = await api.post('/auth/logout')
-    AuthStorage.clearAuth()
-    return response.data
+    try {
+      const response = await api.post('/auth/logout')
+      AuthStorage.clearAuth()
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   static async logoutAll() {
-    const response = await api.post('/auth/logout-all')
-    AuthStorage.clearAuth()
-    return response.data
+    try {
+      const response = await api.post('/auth/logout-all')
+      AuthStorage.clearAuth()
+      return response.data
+    } catch (error) {
+      return handleApiError(error)
+    }
   }
 
   // Security utilities

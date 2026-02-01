@@ -1,8 +1,11 @@
 'use client'
 
 import { memo } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Heart, MessageCircle, Repeat2, Share, Bookmark } from 'lucide-react'
 import { formatRelativeTime } from '@/lib/utils'
+import api from '@/lib/api'
+import toast from 'react-hot-toast'
 import type { Post } from '@/types'
 
 interface PostCardProps {
@@ -10,6 +13,50 @@ interface PostCardProps {
 }
 
 function PostCard({ post }: PostCardProps) {
+  const queryClient = useQueryClient()
+
+  const likeMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post(`/posts/${post.id}/like`)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['timeline'] })
+      queryClient.invalidateQueries({ queryKey: ['user-posts'] })
+    },
+    onError: () => {
+      toast.error('Failed to like post')
+    }
+  })
+
+  const bookmarkMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post(`/posts/${post.id}/bookmark`)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['timeline'] })
+      queryClient.invalidateQueries({ queryKey: ['bookmarks'] })
+    },
+    onError: () => {
+      toast.error('Failed to bookmark post')
+    }
+  })
+
+  const repostMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post(`/posts/${post.id}/repost`)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['timeline'] })
+      toast.success('Post reposted')
+    },
+    onError: () => {
+      toast.error('Failed to repost')
+    }
+  })
+
   if (!post || !post.user) {
     return null
   }
@@ -72,16 +119,24 @@ function PostCard({ post }: PostCardProps) {
               <span className="text-sm tabular-nums">{post.comments_count}</span>
             </button>
             
-            <button className="group flex items-center space-x-1 text-gray-500 hover:text-green-600 transition-colors">
+            <button 
+              onClick={() => repostMutation.mutate()}
+              disabled={repostMutation.isPending}
+              className="group flex items-center space-x-1 text-gray-500 hover:text-green-600 transition-colors disabled:opacity-50"
+            >
               <div className="p-2 rounded-full group-hover:bg-green-50 transition-colors">
                 <Repeat2 className="w-5 h-5" />
               </div>
               <span className="text-sm tabular-nums">{post.quotes_count}</span>
             </button>
             
-            <button className={`group flex items-center space-x-1 transition-colors ${
-              post.is_liked ? 'text-red-600' : 'text-gray-500 hover:text-red-600'
-            }`}>
+            <button 
+              onClick={() => likeMutation.mutate()}
+              disabled={likeMutation.isPending}
+              className={`group flex items-center space-x-1 transition-colors disabled:opacity-50 ${
+                post.is_liked ? 'text-red-600' : 'text-gray-500 hover:text-red-600'
+              }`}
+            >
               <div className={`p-2 rounded-full transition-colors ${
                 post.is_liked ? 'bg-red-50' : 'group-hover:bg-red-50'
               }`}>
@@ -96,9 +151,13 @@ function PostCard({ post }: PostCardProps) {
               </div>
             </button>
             
-            <button className={`group transition-colors ${
-              post.is_bookmarked ? 'text-blue-600' : 'text-gray-500 hover:text-blue-600'
-            }`}>
+            <button 
+              onClick={() => bookmarkMutation.mutate()}
+              disabled={bookmarkMutation.isPending}
+              className={`group transition-colors disabled:opacity-50 ${
+                post.is_bookmarked ? 'text-blue-600' : 'text-gray-500 hover:text-blue-600'
+              }`}
+            >
               <div className={`p-2 rounded-full transition-colors ${
                 post.is_bookmarked ? 'bg-blue-50' : 'group-hover:bg-blue-50'
               }`}>

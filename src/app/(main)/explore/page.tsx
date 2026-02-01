@@ -15,7 +15,11 @@ export default function ExplorePage() {
     queryKey: ['search', searchQuery, activeTab],
     queryFn: async () => {
       if (!searchQuery) return null
-      const response = await api.get(`/search/${activeTab}?q=${encodeURIComponent(searchQuery)}`)
+      let endpoint = '/search/all'
+      if (activeTab === 'people') endpoint = '/search/users'
+      else if (activeTab === 'top' || activeTab === 'latest') endpoint = '/search/posts'
+      
+      const response = await api.get(`${endpoint}?q=${encodeURIComponent(searchQuery)}`)
       return response.data
     },
     enabled: !!searchQuery,

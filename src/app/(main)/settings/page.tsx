@@ -3,16 +3,12 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
-import { Shield, Smartphone, Monitor, Activity, ArrowLeft } from 'lucide-react'
+import { Shield, Smartphone, User, Lock, ArrowLeft } from 'lucide-react'
 import api from '@/lib/api'
 import { TwoFactorSetup, TwoFactorDisable } from '@/components/auth/two-factor-setup'
-import { PasswordChange } from '@/components/settings/password-change'
-import { DeviceManagement } from '@/components/settings/device-management'
-import { SessionManagement } from '@/components/settings/session-management'
-import { SecurityActivity } from '@/components/settings/security-activity'
+import Link from 'next/link'
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('security')
   const [show2FASetup, setShow2FASetup] = useState(false)
   const [show2FADisable, setShow2FADisable] = useState(false)
   const router = useRouter()
@@ -25,11 +21,47 @@ export default function SettingsPage() {
     }
   })
 
-  const tabs = [
-    { id: 'security', name: 'Security', icon: Shield },
-    { id: 'devices', name: 'Devices', icon: Smartphone },
-    { id: 'sessions', name: 'Sessions', icon: Monitor },
-    { id: 'activity', name: 'Activity', icon: Activity }
+  const quickActions = [
+    { 
+      id: 'security-detail', 
+      name: 'Security Activity', 
+      description: 'View detailed security events',
+      icon: Shield, 
+      href: '/settings/security',
+      color: 'text-green-600'
+    },
+    { 
+      id: 'devices-detail', 
+      name: 'Device Management', 
+      description: 'Manage trusted devices',
+      icon: Smartphone, 
+      href: '/settings/devices',
+      color: 'text-green-600'
+    },
+    { 
+      id: 'account-management', 
+      name: 'Account Settings', 
+      description: 'Export data, delete account',
+      icon: User, 
+      href: '/settings/account',
+      color: 'text-green-600'
+    },
+    { 
+      id: 'privacy-settings', 
+      name: 'Privacy Controls', 
+      description: 'Manage privacy settings',
+      icon: Lock, 
+      href: '/settings/privacy',
+      color: 'text-green-600'
+    },
+    {
+      id: 'two-factor-auth',
+      name: 'Two-Factor Authentication',
+      description: user?.two_factor_enabled ? 'Manage 2FA settings' : 'Enable extra security',
+      icon: Shield,
+      action: () => user?.two_factor_enabled ? setShow2FADisable(true) : setShow2FASetup(true),
+      color: 'text-green-600'
+    }
   ]
 
   if (show2FASetup) {
@@ -59,76 +91,60 @@ export default function SettingsPage() {
   return (
     <div className="max-w-xl mx-auto">
       {/* Header */}
-      <div className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-gray-200 px-4 py-3">
+      <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-gray-100 px-4 py-3">
         <div className="flex items-center space-x-4">
           <button 
             onClick={() => router.back()}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            className="p-2 hover:bg-gray-50 rounded-full transition-colors"
           >
-            <ArrowLeft className="h-5 w-5 text-gray-700" />
+            <ArrowLeft className="h-5 w-5 text-gray-600" />
           </button>
           <div>
             <h1 className="text-xl font-bold text-gray-900">Settings</h1>
-            <p className="text-sm text-gray-500">Manage your account</p>
+            <p className="text-sm text-gray-600">Manage your account</p>
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <div className="flex overflow-x-auto">
-          {tabs.map((tab) => {
-            const Icon = tab.icon
+      {/* Quick Actions */}
+      <div className="px-4 py-4">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
+        <div className="grid grid-cols-1 gap-3">
+          {quickActions.map((action) => {
+            const Icon = action.icon
+            const baseClasses = "flex items-center space-x-4 p-4 bg-white rounded-xl border border-gray-100 hover:border-green-200 hover:bg-green-50/50 transition-all duration-200"
+            
+            const content = (
+              <>
+                <Icon className={`h-6 w-6 ${action.color}`} />
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-900 text-base">{action.name}</h3>
+                  <p className="text-sm text-gray-600 mt-0.5">{action.description}</p>
+                </div>
+                <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </>
+            )
+            
+            if (action.href) {
+              return (
+                <Link key={action.id} href={action.href} className={baseClasses}>
+                  {content}
+                </Link>
+              )
+            }
+            
             return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center space-x-2 px-4 py-4 text-15 font-medium whitespace-nowrap transition-colors ${
-                  activeTab === tab.id
-                    ? 'text-gray-900 border-b-2 border-green-600'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <Icon className="h-5 w-5" />
-                <span>{tab.name}</span>
+              <button key={action.id} onClick={action.action} className={`${baseClasses} text-left w-full`}>
+                {content}
               </button>
             )
           })}
         </div>
       </div>
 
-      {/* Content */}
-      <div className="px-4 py-4">
-        {activeTab === 'security' && (
-          <div className="space-y-4">
-            <div className="border border-gray-200 rounded-2xl p-4">
-              <h2 className="text-lg font-bold text-gray-900 mb-2">Two-Factor Authentication</h2>
-              <p className="text-15 text-gray-500 mb-4">
-                {user?.two_factor_enabled 
-                  ? 'Two-factor authentication is enabled' 
-                  : 'Add an extra layer of security to your account'
-                }
-              </p>
-              <button
-                onClick={() => user?.two_factor_enabled ? setShow2FADisable(true) : setShow2FASetup(true)}
-                className={`px-4 py-2 rounded-full text-15 font-bold transition-colors ${
-                  user?.two_factor_enabled
-                    ? 'bg-red-600 text-white hover:bg-red-700'
-                    : 'bg-green-600 text-white hover:bg-green-700'
-                }`}
-              >
-                {user?.two_factor_enabled ? 'Disable 2FA' : 'Enable 2FA'}
-              </button>
-            </div>
 
-            <PasswordChange />
-          </div>
-        )}
-
-        {activeTab === 'devices' && <DeviceManagement />}
-        {activeTab === 'sessions' && <SessionManagement />}
-        {activeTab === 'activity' && <SecurityActivity />}
-      </div>
     </div>
   )
 }

@@ -5,34 +5,45 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
+import { AuthAPI } from '@/lib/auth-api'
 import { AuthCard, AuthInput, AuthButton, AuthDivider, SocialButton } from '@/components/auth/auth-components'
-import { phoneRegisterSchema, handleZodError } from '@/lib/validation'
+import { phoneRegisterSchema, registerStep1Schema, handleZodError } from '@/lib/validation'
 import { z } from 'zod'
-import api from '@/lib/api'
+import toast from 'react-hot-toast'
 
 export default function PhoneRegisterPage() {
   const [step, setStep] = useState(1)
   const [phone, setPhone] = useState('')
+  const [sessionId, setSessionId] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [formData, setFormData] = useState({
     name: '',
+    date_of_birth: '',
     username: '',
     email: '',
     password: '',
     password_confirmation: '',
-    date_of_birth: '',
   })
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const router = useRouter()
   const { login } = useAuth()
 
   const validateStep1 = () => {
-    if (!phone.trim()) {
-      setErrors({ phone: ['Phone number is required'] })
+    try {
+      registerStep1Schema.parse({
+        name: formData.name,
+        date_of_birth: formData.date_of_birth,
+        contact: phone,
+        contact_type: 'phone'
+      })
+      setErrors({})
+      return true
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        setErrors(handleZodError(error))
+      }
       return false
     }
-    setErrors({})
-    return true
   }
 
   const validateStep2 = () => {
@@ -67,74 +78,123 @@ export default function PhoneRegisterPage() {
   }
 
   const sendCodeMutation = useMutation({
-    mutationFn: async (phone: string) => {
-      const response = await api.post('/auth/phone/send-code', { phone })
-      return response.data
+    mutationFn: async (data: { name: string; date_of_birth: string; phone: string }) => {
+      return await AuthAPI.phoneRegisterStep1(data)
     },
-    onSuccess: () => setStep(2),
+    onSuccess: (data) => {
+      setSessionId(data.session_id)
+      setStep(2)
+    },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        toast.error(error.message || 'Failed to send code')
+      }
+    },
   })
 
   const verifyCodeMutation = useMutation({
-    mutationFn: async (data: { phone: string; code: string }) => {
-      const response = await api.post('/auth/phone/verify', { 
-        phone: data.phone, 
-        verification_code: data.code 
-      })
-      return response.data
+    mutationFn: async (data: { session_id: string; code: string }) => {
+      return await AuthAPI.phoneRegisterStep2(data.session_id, data.code)
     },
     onSuccess: () => setStep(3),
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        toast.error(error.message || 'Invalid verification code')
+      }
+    },
   })
 
   const registerMutation = useMutation({
     mutationFn: async (data: {
-      phone: string
-      name: string
+      session_id: string
       username: string
-      email?: string
       password: string
       password_confirmation: string
-      date_of_birth: string
-      verification_code: string
+      email?: string
     }) => {
-      const response = await api.post('/auth/phone/register', data)
-      return response.data
+      return await AuthAPI.phoneRegisterStep3(data)
     },
     onSuccess: async (data) => {
       await login(data.token)
+    },
+    onError: (error: any) => {
+      if (error.status === 422 && error.errors) {
+        setErrors(error.errors)
+      } else {
+        toast.error(error.message || 'Registration failed')
+      }
     },
   })
 
   const handleStep1 = (e: React.FormEvent) => {
     e.preventDefault()
     if (!validateStep1()) return
-    sendCodeMutation.mutate(phone)
+    sendCodeMutation.mutate({ 
+      name: formData.name,
+      date_of_birth: formData.date_of_birth,
+      phone 
+    })
   }
 
   const handleStep2 = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!sessionId) {
+      toast.error('Session expired. Please start over.')
+      return
+    }
     if (!validateStep2()) return
-    verifyCodeMutation.mutate({ phone, code: verificationCode })
+    verifyCodeMutation.mutate({ session_id: sessionId, code: verificationCode })
   }
 
   const handleStep3 = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!sessionId) {
+      toast.error('Session expired. Please start over.')
+      return
+    }
     if (!validateStep3()) return
     registerMutation.mutate({
-      phone,
-      name: formData.name,
+      session_id: sessionId,
       username: formData.username,
-      email: formData.email || undefined,
       password: formData.password,
       password_confirmation: formData.password_confirmation,
+      email: formData.email || undefined
+    })
+  }
+
+  const handleResendCode = () => {
+    sendCodeMutation.mutate({ 
+      name: formData.name,
       date_of_birth: formData.date_of_birth,
-      verification_code: verificationCode
+      phone 
     })
   }
 
   if (step === 1) {
     return (
-      <AuthCard title="Sign up with phone" subtitle="Step 1 of 3: Enter your phone number">
+      <AuthCard title="Sign up with phone" subtitle="Step 1 of 3: Enter your details">
         <form onSubmit={handleStep1} className="space-y-6">
+          <AuthInput
+            label="Name"
+            type="text"
+            placeholder="Enter your name"
+            value={formData.name}
+            onChange={(value) => setFormData({ ...formData, name: value })}
+            error={errors.name}
+          />
+
+          <AuthInput
+            label="Date of Birth"
+            type="date"
+            value={formData.date_of_birth}
+            onChange={(value) => setFormData({ ...formData, date_of_birth: value })}
+            error={errors.date_of_birth}
+          />
+          
           <AuthInput
             label="Phone Number"
             type="tel"
@@ -150,12 +210,9 @@ export default function PhoneRegisterPage() {
           </AuthButton>
         </form>
         
-        <AuthDivider text="Or sign up with" />
+        <AuthDivider text="Or" />
         
-        <div className="grid grid-cols-2 gap-3">
-          <SocialButton provider="google" href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/google`} />
-          <SocialButton provider="apple" href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/apple`} />
-        </div>
+        <SocialButton provider="google" href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/google`} />
         
         <div className="text-center mt-4">
           <Link href="/register" className="text-sm text-green-600 hover:text-green-500 hover:underline">
@@ -195,7 +252,7 @@ export default function PhoneRegisterPage() {
           <div className="text-center">
             <button
               type="button"
-              onClick={() => sendCodeMutation.mutate(phone)}
+              onClick={handleResendCode}
               disabled={sendCodeMutation.isPending}
               className="text-sm text-green-600 hover:text-green-500 disabled:opacity-50"
             >
@@ -211,10 +268,9 @@ export default function PhoneRegisterPage() {
     <AuthCard title="Complete your profile" subtitle="Step 3 of 3: Fill in your details">
       <form onSubmit={handleStep3} className="space-y-6">
         <AuthInput
-          label="Full Name"
+          label="Name"
           type="text"
-          placeholder="Enter your full name"
-          fieldType="text"
+          placeholder="Enter your name"
           value={formData.name}
           onChange={(value) => setFormData({ ...formData, name: value })}
           error={errors.name}
@@ -238,14 +294,6 @@ export default function PhoneRegisterPage() {
           value={formData.email}
           onChange={(value) => setFormData({ ...formData, email: value })}
           error={errors.email}
-        />
-        
-        <AuthInput
-          label="Date of Birth"
-          type="date"
-          value={formData.date_of_birth}
-          onChange={(value) => setFormData({ ...formData, date_of_birth: value })}
-          error={errors.date_of_birth}
         />
         
         <AuthInput
