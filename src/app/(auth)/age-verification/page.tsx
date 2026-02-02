@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useMutation } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
@@ -8,12 +8,23 @@ import { AuthCard, AuthInput, AuthButton } from '@/components/auth/auth-componen
 import { ageVerificationSchema, handleZodError } from '@/lib/validation'
 import { z } from 'zod'
 import { AuthAPI } from '@/lib/auth-api'
+import toast from 'react-hot-toast'
 
 export default function AgeVerificationPage() {
   const [dateOfBirth, setDateOfBirth] = useState('')
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const router = useRouter()
-  const { updateUser } = useAuth()
+  const { login, updateUser } = useAuth()
+
+  useEffect(() => {
+    // Check if we have a temporary token from social auth
+    const tempToken = localStorage.getItem('temp_auth_token')
+    if (tempToken) {
+      // Set the token for API calls
+      localStorage.setItem('auth_token', tempToken)
+      localStorage.removeItem('temp_auth_token')
+    }
+  }, [])
 
   const validateAge = () => {
     try {
@@ -32,8 +43,9 @@ export default function AgeVerificationPage() {
     mutationFn: async (dateOfBirth: string) => {
       return await AuthAPI.completeAgeVerification(dateOfBirth)
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       updateUser(data.user)
+      toast.success('Age verification completed!')
       router.push('/timeline')
     },
     onError: (error: any) => {
@@ -83,6 +95,14 @@ export default function AgeVerificationPage() {
             onChange={(value) => setDateOfBirth(value)}
             error={errors.date_of_birth}
           />
+          
+          {errors.general && (
+            <div className="text-sm text-red-600">
+              {errors.general.map((err, index) => (
+                <div key={index}>{err}</div>
+              ))}
+            </div>
+          )}
           
           <AuthButton type="submit" loading={verifyAgeMutation.isPending}>
             Complete Registration
