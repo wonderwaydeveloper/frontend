@@ -2,18 +2,19 @@
 
 import { useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useAuth } from '@/contexts/auth-context'
+import { AuthStorage } from '@/lib/auth-storage'
 import toast from 'react-hot-toast'
 
 export default function SocialCallbackPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { login } = useAuth()
 
   useEffect(() => {
     const handleAuth = async () => {
       const token = searchParams.get('token')
       const requiresAgeVerification = searchParams.get('requires_age_verification') === 'true'
+      const requiresDeviceVerification = searchParams.get('requires_device_verification') === 'true'
+      const fingerprint = searchParams.get('fingerprint')
       const error = searchParams.get('error')
       const provider = searchParams.get('provider') || 'google'
 
@@ -27,16 +28,27 @@ export default function SocialCallbackPage() {
         return
       }
 
+      if (requiresDeviceVerification && fingerprint) {
+        toast.success('Authentication successful! Please verify your device.')
+        router.push(`/device-verification?fingerprint=${fingerprint}`)
+        return
+      }
+
       if (token) {
         try {
+          // Validate token format before storing
+          if (typeof token === 'string' && token.length > 10) {
+            AuthStorage.setToken(token)
+          } else {
+            throw new Error('Invalid token format')
+          }
+          
           if (requiresAgeVerification) {
-            // Store token temporarily and redirect to age verification
-            localStorage.setItem('temp_auth_token', token)
             toast.success('Authentication successful! Please complete your profile.')
             router.push('/age-verification')
           } else {
-            await login(token)
             toast.success('Successfully signed in with Google!')
+            router.push('/timeline')
           }
         } catch (authError: any) {
           console.error('Auth error:', authError)
@@ -50,7 +62,7 @@ export default function SocialCallbackPage() {
     }
 
     handleAuth()
-  }, [searchParams, login, router])
+  }, [searchParams, router])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">

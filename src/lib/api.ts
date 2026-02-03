@@ -4,6 +4,11 @@ import { AuthStorage } from './auth-storage'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
+// CSRF token cache to prevent race conditions
+let csrfTokenPromise: Promise<void> | null = null
+let lastCsrfFetch = 0
+const CSRF_CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -13,6 +18,37 @@ export const api = axios.create({
   timeout: 10000,
   withCredentials: true, // Enable cookies
 })
+
+// Function to get CSRF token with caching
+const getCSRFToken = async (): Promise<void> => {
+  const now = Date.now()
+  
+  // Return existing promise if one is in progress
+  if (csrfTokenPromise) {
+    return csrfTokenPromise
+  }
+  
+  // Use cached token if still valid
+  if (now - lastCsrfFetch < CSRF_CACHE_DURATION) {
+    return Promise.resolve()
+  }
+  
+  // Create new promise to prevent race conditions
+  csrfTokenPromise = (async () => {
+    try {
+      await axios.get(`${API_BASE_URL.replace('/api', '')}/sanctum/csrf-cookie`, {
+        withCredentials: true
+      })
+      lastCsrfFetch = now
+    } catch (error) {
+      console.warn('Failed to get CSRF token:', error)
+    } finally {
+      csrfTokenPromise = null
+    }
+  })()
+  
+  return csrfTokenPromise
+}
 
 // Request interceptor for CSRF and security
 api.interceptors.request.use(
@@ -26,10 +62,7 @@ api.interceptors.request.use(
     // Get CSRF token for state-changing requests
     if (['post', 'put', 'patch', 'delete'].includes(config.method?.toLowerCase() || '')) {
       try {
-        // Get CSRF token from Laravel Sanctum
-        const csrfResponse = await axios.get(`${API_BASE_URL.replace('/api', '')}/sanctum/csrf-cookie`, {
-          withCredentials: true
-        })
+        await getCSRFToken()
         
         // Extract CSRF token from cookie
         const csrfToken = document.cookie

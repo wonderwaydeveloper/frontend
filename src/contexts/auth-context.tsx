@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { AuthAPI } from '@/lib/auth-api'
 import { AuthStorage } from '@/lib/auth-storage'
@@ -30,12 +30,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [requires2FA, setRequires2FA] = useState(false)
   const [requiresAgeVerification, setRequiresAgeVerification] = useState(false)
   const router = useRouter()
+  
+  // Race condition prevention
+  const fetchUserRef = useRef<Promise<any> | null>(null)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const isAuthenticated = !!user && !requires2FA && !requiresAgeVerification
 
   const fetchUser = useCallback(async () => {
+    // Prevent concurrent fetchUser calls
+    if (fetchUserRef.current) {
+      return fetchUserRef.current
+    }
+    
     try {
-      const userData = await AuthAPI.getCurrentUser()
+      fetchUserRef.current = AuthAPI.getCurrentUser()
+      const userData = await fetchUserRef.current
       setUser(userData)
       
       // Check if age verification is needed
@@ -48,10 +58,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error.response?.status === 401) {
         AuthStorage.clearAuth()
         setUser(null)
+      } else if (error.message === 'NEW_DEVICE_DETECTED') {
+        // Handle device verification for social login - throw specific error
+        const fingerprint = AuthAPI.generateDeviceFingerprint()
+        router.push(`/device-verification?fingerprint=${fingerprint}`)
+        throw new Error('DEVICE_VERIFICATION_REQUIRED')
       }
       throw error
+    } finally {
+      fetchUserRef.current = null
     }
-  }, [])
+  }, [router])
 
   const refreshUser = useCallback(async () => {
     if (!AuthStorage.isAuthenticated()) return
@@ -65,18 +82,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const initAuth = async () => {
+      // Don't fetch user on device verification page
+      if (window.location.pathname.includes('/device-verification')) {
+        setIsLoading(false)
+        return
+      }
+      
       if (AuthStorage.isAuthenticated()) {
         try {
           await fetchUser()
-        } catch (error) {
+        } catch (error: any) {
+          if (error.message === 'DEVICE_VERIFICATION_REQUIRED') {
+            // Device verification is already handled in fetchUser, just set loading to false
+            setIsLoading(false)
+            return
+          }
           console.error('Auth initialization failed:', error)
+          // Clear invalid token
+          AuthStorage.clearAuth()
         }
       }
       setIsLoading(false)
     }
 
     initAuth()
-  }, [fetchUser])
+    
+    // Listen for storage changes (for social login)
+    const handleStorageChange = () => {
+      if (window.location.pathname.includes('/device-verification')) {
+        return // Don't fetch on device verification page
+      }
+      if (AuthStorage.isAuthenticated() && !user && !fetchUserRef.current) {
+        fetchUser().catch(() => {}) // Silent catch
+      }
+    }
+    
+    window.addEventListener('storage', handleStorageChange)
+    
+    // Check for token changes every 30 seconds (optimized for performance)
+    // But don't run if we're on device verification page
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+    }
+    
+    intervalRef.current = setInterval(() => {
+      if (window.location.pathname.includes('/device-verification')) {
+        return // Don't fetch user on device verification page
+      }
+      if (AuthStorage.isAuthenticated() && !user && !isLoading && !fetchUserRef.current) {
+        fetchUser().catch(() => {}) // Silent catch to prevent spam
+      }
+    }, 30000) // Changed from 1000ms to 30000ms
+    
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
+    }
+  }, [fetchUser, user, isLoading])
 
   // Auto-refresh user data periodically
   useEffect(() => {

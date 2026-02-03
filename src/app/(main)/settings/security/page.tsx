@@ -123,11 +123,11 @@ export default function SecurityPage() {
           <SecurityEventsSkeleton />
         ) : (
           <div className="space-y-4">
-            {filteredEvents?.map((event: SecurityEvent) => {
+            {filteredEvents?.map((event: SecurityEvent, index: number) => {
               const severity = getEventSeverity(event.event_type)
               return (
                 <div 
-                  key={event.id} 
+                  key={event.id || index} 
                   className="bg-white rounded-lg border border-gray-100 p-6"
                 >
                   <div className="flex items-start space-x-4">

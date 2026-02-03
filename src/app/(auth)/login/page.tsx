@@ -625,7 +625,7 @@ export default function LoginPage() {
       
       <SocialButton 
         provider="google" 
-        href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/google`} 
+        href={AuthAPI.getSocialAuthUrl('google')} 
       />
 
       <div className="mt-6 space-y-4">

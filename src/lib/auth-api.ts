@@ -372,11 +372,23 @@ export class AuthAPI {
     }
   }
 
-  static async resendDeviceCode(fingerprint: string) {
+  static async resendDeviceCode(fingerprint: string, userId?: string) {
     try {
-      const response = await api.post('/auth/resend-device-code', {
-        fingerprint
-      })
+      const payload: any = { fingerprint }
+      
+      // Try to get user_id from URL params or localStorage
+      if (userId) {
+        payload.user_id = userId
+      } else {
+        // Try to get from URL params
+        const urlParams = new URLSearchParams(window.location.search)
+        const userIdFromUrl = urlParams.get('user_id')
+        if (userIdFromUrl) {
+          payload.user_id = parseInt(userIdFromUrl)
+        }
+      }
+      
+      const response = await api.post('/auth/resend-device-code', payload)
       return response.data
     } catch (error) {
       return handleApiError(error)

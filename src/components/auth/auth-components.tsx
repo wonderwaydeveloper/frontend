@@ -201,6 +201,7 @@ export function AuthDivider({ text }: { text: string }) {
 
 export function SocialButton({ provider, href }: { provider: 'google'; href: string }) {
   const handleClick = () => {
+    console.log('Google OAuth URL:', href)
     // Open in same window for proper OAuth flow
     window.location.href = href
   }
