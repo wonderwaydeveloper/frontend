@@ -44,12 +44,9 @@ export default function EmailVerifyPage() {
     }
   }, [resendTimer])
 
-  // Auto-submit when code is complete
+  // Remove auto-submit functionality
   const handleCodeChange = (value: string) => {
     setCode(value)
-    if (value.length === 6 && !verifyMutation.isPending) {
-      verifyMutation.mutate(value)
-    }
   }
 
   const validateCode = () => {

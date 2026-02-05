@@ -55,14 +55,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       return userData
     } catch (error: any) {
+      console.error('fetchUser error:', error)
       if (error.response?.status === 401) {
+        console.log('401 error - clearing auth')
         AuthStorage.clearAuth()
         setUser(null)
+      } else if (error.response?.status === 429) {
+        // Rate limit - don't logout user, just log error
+        console.warn('Rate limit exceeded, skipping user refresh')
+        return null
       } else if (error.message === 'NEW_DEVICE_DETECTED') {
         // Handle device verification for social login - throw specific error
         const fingerprint = AuthAPI.generateDeviceFingerprint()
         router.push(`/device-verification?fingerprint=${fingerprint}`)
         throw new Error('DEVICE_VERIFICATION_REQUIRED')
+      } else {
+        // For network errors, clear invalid tokens
+        console.log('Network/other error - clearing auth')
+        AuthStorage.clearAuth()
+        setUser(null)
       }
       throw error
     } finally {
@@ -75,8 +86,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     try {
       await fetchUser()
-    } catch (error) {
-      console.error('Failed to refresh user:', error)
+    } catch (error: any) {
+      // Don't log rate limit errors to avoid spam
+      if (error.response?.status !== 429) {
+        console.error('Failed to refresh user:', error)
+      }
     }
   }, [fetchUser])
 
@@ -116,38 +130,73 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         fetchUser().catch(() => {}) // Silent catch
       }
     }
-    
-    window.addEventListener('storage', handleStorageChange)
-    
-    // Check for token changes every 30 seconds (optimized for performance)
-    // But don't run if we're on device verification page
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
+
+    // Refresh when user returns to tab (Twitter-style)
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isAuthenticated && !fetchUserRef.current) {
+        // User returned to tab - refresh user data
+        refreshUser()
+      }
     }
     
-    intervalRef.current = setInterval(() => {
-      if (window.location.pathname.includes('/device-verification')) {
-        return // Don't fetch user on device verification page
-      }
-      if (AuthStorage.isAuthenticated() && !user && !isLoading && !fetchUserRef.current) {
-        fetchUser().catch(() => {}) // Silent catch to prevent spam
-      }
-    }, 30000) // Changed from 1000ms to 30000ms
+    window.addEventListener('storage', handleStorageChange)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    
+    // DISABLED: Check for token changes - causes rate limiting
+    // if (intervalRef.current) {
+    //   clearInterval(intervalRef.current)
+    // }
+    // 
+    // intervalRef.current = setInterval(() => {
+    //   if (window.location.pathname.includes('/device-verification')) {
+    //     return
+    //   }
+    //   if (AuthStorage.isAuthenticated() && !user && !isLoading && !fetchUserRef.current) {
+    //     fetchUser().catch(() => {})
+    //   }
+    // }, 30000)
     
     return () => {
       window.removeEventListener('storage', handleStorageChange)
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [fetchUser, user, isLoading])
 
-  // Auto-refresh user data periodically
+  // Smart refresh: Only when user becomes active after being idle
   useEffect(() => {
     if (!isAuthenticated) return
 
-    const interval = setInterval(refreshUser, 5 * 60 * 1000) // 5 minutes
-    return () => clearInterval(interval)
+    let isIdle = false
+    let idleTimer: NodeJS.Timeout
+
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimer)
+      if (isIdle) {
+        // User became active after being idle - refresh user data
+        isIdle = false
+        refreshUser()
+      }
+      // Set user as idle after 5 minutes of inactivity
+      idleTimer = setTimeout(() => {
+        isIdle = true
+      }, 5 * 60 * 1000)
+    }
+
+    // Listen for user activity
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click']
+    events.forEach(event => {
+      document.addEventListener(event, resetIdleTimer, true)
+    })
+
+    // Initial timer
+    resetIdleTimer()
+
+    return () => {
+      clearTimeout(idleTimer)
+      events.forEach(event => {
+        document.removeEventListener(event, resetIdleTimer, true)
+      })
+    }
   }, [isAuthenticated, refreshUser])
 
   const login = async (token?: string) => {

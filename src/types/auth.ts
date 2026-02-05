@@ -18,6 +18,7 @@ export interface User {
 export interface LoginCredentials {
   login: string
   password: string
+  two_factor_code?: string
 }
 
 export interface RegistrationData {
@@ -39,6 +40,10 @@ export interface AuthResponse {
   requires_age_verification?: boolean
   fingerprint?: string
   resend_available_at?: number
+  code_expires_at?: number
+  temp_token?: string
+  password_strength?: number
+  attempts_remaining?: number
 }
 
 export interface ApiError {
@@ -58,7 +63,9 @@ export interface Device {
   is_current?: boolean
   is_trusted: boolean
   last_activity: string
+  last_used_at: string
   created_at: string
+  fingerprint?: string
 }
 
 export interface SecurityEvent {

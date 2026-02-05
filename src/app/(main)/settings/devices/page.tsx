@@ -87,7 +87,9 @@ export default function DevicesPage() {
       const activity = await AuthAPI.getDeviceActivity(deviceId)
       setSelectedDevice({ ...devices?.find((d: Device) => d.id.toString() === deviceId), activity })
     } catch (error) {
+      console.error('Failed to load device activity:', error)
       toast.error('Failed to load device activity')
+      setSelectedDevice(null) // Reset state on error
     }
   }
 

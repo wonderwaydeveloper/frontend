@@ -21,6 +21,10 @@ export default function SocialCallbackPage() {
       if (error) {
         if (error === 'social_auth_failed') {
           toast.error('Google authentication failed. Please try again.')
+        } else if (error === 'rate_limit_exceeded') {
+          const retryAfter = searchParams.get('retry_after')
+          const minutes = retryAfter ? Math.ceil(parseInt(retryAfter) / 60) : 5
+          toast.error(`Too many authentication attempts. Please wait ${minutes} minutes before trying again.`)
         } else {
           toast.error('Social authentication failed')
         }
@@ -29,6 +33,13 @@ export default function SocialCallbackPage() {
       }
 
       if (requiresDeviceVerification && fingerprint) {
+        const resendAvailableAt = searchParams.get('resend_available_at')
+        
+        // Set initial timer if provided
+        if (resendAvailableAt) {
+          localStorage.setItem('device_resend_time', resendAvailableAt)
+        }
+        
         toast.success('Authentication successful! Please verify your device.')
         router.push(`/device-verification?fingerprint=${fingerprint}`)
         return

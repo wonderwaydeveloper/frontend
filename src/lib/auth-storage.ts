@@ -12,7 +12,7 @@ export class AuthStorage {
     localStorage.setItem(this.TOKEN_STORAGE, token)
     
     // Also set as cookie for API calls
-    const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+    const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days - match backend
     document.cookie = `${this.TOKEN_COOKIE}=${token}; expires=${expires.toUTCString()}; path=/; secure; samesite=strict`
   }
 

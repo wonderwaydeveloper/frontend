@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AuthAPI } from '@/lib/auth-api'
@@ -24,10 +24,17 @@ export default function DeviceVerificationPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { login: authLogin } = useAuth()
-  const submitTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const fingerprint = searchParams.get('fingerprint') || getLocalStorageItem('device_fingerprint', '')
   const userId = searchParams.get('user_id')
+
+  // Check for session validity on mount
+  useEffect(() => {
+    if (!fingerprint || !userId) {
+      toast.error('Session expired. Please login again.')
+      router.push('/login')
+    }
+  }, [fingerprint, userId, router])
 
   // Timer countdown effect
   useEffect(() => {
@@ -37,26 +44,11 @@ export default function DeviceVerificationPage() {
     }
   }, [resendTimer])
 
-  // Auto-submit when code is complete
+  // Remove auto-submit functionality
   const handleCodeChange = (value: string) => {
     const numericValue = value.replace(/\D/g, '')
     setCode(numericValue)
-    
-    if (numericValue.length === 6 && !isSubmitting && !verifyMutation.isPending) {
-      // Clear any existing timeout
-      if (submitTimeoutRef.current) {
-        clearTimeout(submitTimeoutRef.current)
-      }
-      
-      // Set new timeout with debounce
-      submitTimeoutRef.current = setTimeout(() => {
-        if (!isSubmitting && !verifyMutation.isPending) {
-          verifyMutation.mutate(numericValue)
-        }
-      }, 800)
-    }
   }
-
   const verifyMutation = useMutation({
     mutationFn: (code: string) => {
       setIsSubmitting(true)
@@ -131,6 +123,16 @@ export default function DeviceVerificationPage() {
       
       // Show appropriate error message
       if (error.status === 422 && error.errors) {
+        const sessionError = error.errors.session?.[0]
+        if (sessionError && sessionError.includes('session')) {
+          // Session expired - redirect to login
+          toast.error('Session expired. Please login again.')
+          localStorage.removeItem('device_resend_time')
+          localStorage.removeItem('device_fingerprint')
+          router.push('/login')
+          return
+        }
+        
         const errorMessage = error.errors.session?.[0] || error.errors.user_id?.[0] || error.message
         toast.error(errorMessage || 'Failed to resend code')
       } else {
@@ -151,15 +153,6 @@ export default function DeviceVerificationPage() {
       resendMutation.mutate()
     }
   }
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (submitTimeoutRef.current) {
-        clearTimeout(submitTimeoutRef.current)
-      }
-    }
-  }, [])
 
   return (
     <AuthCard 

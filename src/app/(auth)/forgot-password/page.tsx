@@ -50,12 +50,9 @@ export default function ForgotPasswordPage() {
     }
   }, [resendTimer])
 
-  // Auto-submit when code is complete
+  // Remove auto-submit functionality
   const handleCodeChange = (value: string) => {
     setCode(value)
-    if (value.length === 6) {
-      verifyCodeMutation.mutate({ email, code: value })
-    }
   }
 
   const validateStep1 = () => {
@@ -148,7 +145,6 @@ export default function ForgotPasswordPage() {
       if (error.status === 429) {
         if (error.retry_after) {
           const remainingTime = error.retry_after - Math.floor(Date.now() / 1000)
-          setRateLimitEndTime(error.retry_after)
           setResendTimer(Math.max(0, remainingTime))
           if (remainingTime > 0) {
             localStorage.setItem('forgot-password-timer', error.retry_after.toString())

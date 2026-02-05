@@ -79,12 +79,9 @@ export default function RegisterPage() {
     }
   }
 
-  // Auto-submit when code is complete
+  // Remove auto-submit functionality
   const handleCodeChange = (value: string) => {
     setCode(value)
-    if (value.length === 6 && !step2Mutation.isPending) {
-      step2Mutation.mutate({ session_id: sessionId, code: value })
-    }
   }
 
   const validateStep1 = () => {
@@ -337,7 +334,7 @@ export default function RegisterPage() {
         
         <AuthDivider text="Or" />
         
-        <SocialButton provider="google" href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/social/google`} />
+        <SocialButton provider="google" href={AuthAPI.getSocialAuthUrl('google')} />
         
         <div className="text-center mt-4">
           <Link href="/login" className="text-sm text-green-600 hover:text-green-500 hover:underline">

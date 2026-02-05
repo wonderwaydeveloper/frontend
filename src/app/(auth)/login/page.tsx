@@ -232,6 +232,10 @@ export default function LoginPage() {
     onSuccess: async (data) => {
       if (data.requires_2fa) {
         setRequires2FA(true)
+      } else if (data.temp_token) {
+        // Handle temp token for 2FA
+        localStorage.setItem('temp_2fa_token', data.temp_token)
+        setRequires2FA(true)
       } else if (data.requires_device_verification) {
         localStorage.setItem('device_fingerprint', data.fingerprint)
         localStorage.setItem('device_resend_time', data.resend_available_at?.toString() || '0')

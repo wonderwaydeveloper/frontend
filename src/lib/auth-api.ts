@@ -28,10 +28,11 @@ const handleApiError = (error: any): never => {
     if (status === 429) {
       const message = data.error || data.message || 'Too many requests'
       const authError = new AuthError(message, status)
-      // Add rate limit data to error
+      // Add all possible rate limit data
       ;(authError as any).retry_after = data.retry_after
       ;(authError as any).resend_available_at = data.resend_available_at
       ;(authError as any).remaining_seconds = data.remaining_seconds
+      ;(authError as any).attempts_remaining = data.attempts_remaining
       throw authError
     }
     
@@ -81,6 +82,11 @@ export interface TwoFactorSetup {
   secret: string
   qr_code_url: string
   backup_codes?: string[]
+}
+
+export interface PasswordChangeResponse {
+  message: string
+  password_strength?: number
 }
 
 export class AuthAPI {
@@ -193,7 +199,7 @@ export class AuthAPI {
 
   static async completeAgeVerification(dateOfBirth: string) {
     try {
-      const response = await api.post('/auth/social/complete-age-verification', {
+      const response = await api.post('/auth/complete-age-verification', {
         date_of_birth: dateOfBirth
       })
       return response.data
@@ -244,7 +250,7 @@ export class AuthAPI {
     }
   }
 
-  static async changePassword(currentPassword: string, password: string, passwordConfirmation: string) {
+  static async changePassword(currentPassword: string, password: string, passwordConfirmation: string): Promise<PasswordChangeResponse> {
     try {
       const response = await api.post('/auth/password/change', {
         current_password: currentPassword,
@@ -349,7 +355,6 @@ export class AuthAPI {
     username: string
     password: string
     password_confirmation: string
-    email?: string
   }) {
     try {
       const response = await api.post('/auth/register/step3', data)
@@ -405,6 +410,7 @@ export class AuthAPI {
     }
   }
 
+  // Device Management - مطابق backend endpoints
   static async getDevices() {
     try {
       const response = await api.get('/devices/list')
@@ -435,16 +441,6 @@ export class AuthAPI {
   static async revokeAllDevices(password: string) {
     try {
       const response = await api.post('/devices/revoke-all', { password })
-      return response.data
-    } catch (error) {
-      return handleApiError(error)
-    }
-  }
-
-  // Advanced device management
-  static async registerAdvancedDevice(deviceInfo: DeviceInfo) {
-    try {
-      const response = await api.post('/devices/advanced/register', deviceInfo)
       return response.data
     } catch (error) {
       return handleApiError(error)
@@ -499,21 +495,26 @@ export class AuthAPI {
     }
   }
 
-  // Security utilities
+  // Security utilities - مطابق بکاند
   static generateDeviceFingerprint(): string {
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')
-    ctx?.fillText('Device fingerprint', 10, 10)
-    
-    const fingerprint = [
-      navigator.userAgent,
-      navigator.language,
+    const components = [
+      navigator.userAgent || '',
+      navigator.language || '',
       screen.width + 'x' + screen.height,
-      new Date().getTimezoneOffset(),
-      canvas.toDataURL()
-    ].join('|')
+      new Date().getTimezoneOffset().toString(),
+      navigator.platform || '',
+      navigator.cookieEnabled ? '1' : '0'
+    ]
     
-    return btoa(fingerprint).slice(0, 32)
+    const fingerprint = components.join('|')
+    // Simple hash function مشابه بکاند
+    let hash = 0
+    for (let i = 0; i < fingerprint.length; i++) {
+      const char = fingerprint.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(16).padStart(8, '0')
   }
 
   static getDeviceInfo(): DeviceInfo {
